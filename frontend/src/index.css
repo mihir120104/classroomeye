@@ -1,0 +1,21 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * { box-sizing: border-box; }
+  html { background-color: #080B0F; color: #E6EDF3; font-family: 'DM Sans', sans-serif; -webkit-font-smoothing: antialiased; }
+  body { margin: 0; min-height: 100vh; }
+  h1, h2, h3, h4 { font-family: 'Syne', sans-serif; }
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: #0D1117; }
+  ::-webkit-scrollbar-thumb { background: #30363D; border-radius: 3px; }
+}
+
+@layer components {
+  .btn-primary { @apply bg-[#00FF87] text-[#080B0F] font-bold px-6 py-3 rounded-lg hover:brightness-110 active:scale-95 transition-all duration-150 text-sm; }
+  .btn-ghost { @apply border border-[#30363D] text-gray-300 px-6 py-3 rounded-lg hover:border-gray-400 hover:text-white active:scale-95 transition-all duration-150 text-sm; }
+  .card { @apply bg-[#161B22] border border-[#21262D] rounded-xl p-6; }
+}
+
+.dot-grid { background-image: radial-gradient(circle, #21262D 1px, transparent 1px); background-size: 24px 24px; }
