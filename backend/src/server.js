@@ -15,6 +15,10 @@ const { startWeeklyCron } = require("./services/cron");
 const app = express();
 const PORT = process.env.PORT || 4000;
 
+app.get("/health", (_req, res) => {
+  res.status(200).json({ status: "ok", service: "classroomeye-backend" });
+});
+
 app.use(helmet());
 app.use(cors({ origin: process.env.FRONTEND_URL || "http://localhost:5173", credentials: true }));
 
@@ -29,8 +33,6 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use("/api/auth", authRoutes);
 app.use("/api/sessions", sessionRoutes);
-
-app.get("/health", (_req, res) => res.json({ status: "ok", service: "classroomeye-backend" }));
 app.use((_req, res) => res.status(404).json({ error: "Route not found" }));
 app.use((err, _req, res, _next) => { logger.error("Unhandled error:", err); res.status(500).json({ error: "Internal server error" }); });
 
