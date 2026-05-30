@@ -25,3 +25,7 @@ api.interceptors.response.use(
 );
 
 export default api;
+
+// Public client — no auth, no redirect to login
+// Use this for student join pages
+export const publicApi = axios.create({ baseURL, timeout: 15000 });

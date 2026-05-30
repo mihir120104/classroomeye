@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const StudentSchema = new mongoose.Schema(
   {
     name: { type: String, default: "Student" },
+    email: { type: String, default: null }, 
     engagementTimeline: [{ timestamp: Date, score: Number, yaw: Number, pitch: Number, eyeOpenness: Number, isPresent: Boolean }],
     averageScore: { type: Number, default: 0 },
     attentionDrops: [{ type: Date }],

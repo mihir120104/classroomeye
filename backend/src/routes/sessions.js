@@ -119,7 +119,7 @@ router.get("/:id", requireAuth, async (req, res) => {
 });
 
 router.post("/:id/join", async (req, res) => {
-  const { name } = req.body;
+  const { name, email } = req.body;
   if (!name?.trim()) {
     return res.status(400).json({ error: "Name is required" });
   }
@@ -153,6 +153,7 @@ router.post("/:id/join", async (req, res) => {
   // New student — add to session
   session.students.push({
     name: name.trim(),
+    email: email?.trim()?.toLowerCase() || null,
     engagementTimeline: [],
     attentionDrops: [],
   });
@@ -166,6 +167,30 @@ router.post("/:id/join", async (req, res) => {
     sessionId: session._id,
     rejoined: false,
   });
+});
+
+// GET /api/sessions/:id/status — PUBLIC, no auth required
+// Students use this to check if session is live before joining
+router.get("/:id/status", async (req, res) => {
+  try {
+    const session = await Session.findById(
+      req.params.id,
+      { status: 1, startTime: 1, studentCount: 1, "students.name": 1 }
+    ).lean();
+
+    if (!session) {
+      return res.status(404).json({ error: "Session not found" });
+    }
+
+    res.json({
+      status: session.status,
+      isLive: session.status === "live",
+      startTime: session.startTime,
+      studentCount: session.students?.length || 0,
+    });
+  } catch {
+    res.status(400).json({ error: "Invalid session ID" });
+  }
 });
 
 module.exports = router;
