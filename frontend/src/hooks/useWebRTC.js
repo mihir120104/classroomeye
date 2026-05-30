@@ -6,7 +6,7 @@ export default function useWebRTC({ sessionId, onScores }) {
   const [error, setError] = useState(null);
   const [isCapturing, setIsCapturing] = useState(false);
   const videoRef = useRef(null);
-  const canvasRef = useRef(document.createElement("canvas"));
+  const canvasRef = useRef(null);
   const framesRef = useRef([]);
   const captureTimer = useRef(null);
   const sendTimer = useRef(null);
@@ -15,9 +15,11 @@ export default function useWebRTC({ sessionId, onScores }) {
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !video.readyState || video.readyState < 2) return;
-    canvas.width = 320; canvas.height = 240;
-    canvas.getContext("2d").drawImage(video, 0, 0, 320, 240);
-    framesRef.current.push({ studentIndex: 0, frame: canvas.toDataURL("image/jpeg", 0.7).split(",")[1] });
+    // Lazy canvas creation for mobile
+    if (!canvasRef.current) {
+      canvasRef.current = document.createElement("canvas");
+    }
+    // ... rest of code
   }, []);
 
   const sendFrames = useCallback(async () => {

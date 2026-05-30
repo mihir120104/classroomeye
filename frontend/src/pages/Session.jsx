@@ -35,7 +35,7 @@ export default function Session() {
   const [showLinks, setShowLinks] = useState(true);
 
   const videoRef = useRef(null);
-  const canvasRef = useRef(document.createElement("canvas"));
+  const canvasRef = useRef(null);
   const streamRef = useRef(null);
   const captureTimer = useRef(null);
   const sendTimer = useRef(null);
@@ -69,7 +69,11 @@ export default function Session() {
     if (!sessionData || isCapturing) return;
     if (sessionData.status === "completed") return; // don't start camera for ended sessions
 
-    if (Notification.permission === "default") Notification.requestPermission();
+    try {
+      if (typeof Notification !== "undefined" && Notification.permission === "default") {
+        Notification.requestPermission();
+      }
+    } catch (e) { }
 
     navigator.mediaDevices
       .getUserMedia({ video: { width: 640, height: 480, facingMode: "user" }, audio: false })
@@ -81,6 +85,10 @@ export default function Session() {
         captureTimer.current = setInterval(() => {
           const video = videoRef.current;
           if (!video || video.readyState < 2) return;
+          // Create canvas lazily — fixes mobile crash
+          if (!canvasRef.current) {
+            canvasRef.current = document.createElement("canvas");
+          }
           const canvas = canvasRef.current;
           canvas.width = 320; canvas.height = 240;
           canvas.getContext("2d").drawImage(video, 0, 0, 320, 240);
@@ -103,11 +111,13 @@ export default function Session() {
                 if (wasOk && nowBad) {
                   const name = sessionData?.students?.[studentIndex]?.name
                     || `Student ${studentIndex + 1}`;
-                  if (Notification.permission === "granted") {
-                    new Notification("ClassroomEye ⚠", {
-                      body: `${name} is distracted (score: ${engagementScore})`,
-                    });
-                  }
+                  try {
+                    if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+                      new Notification("ClassroomEye ⚠", {
+                        body: `${name} is distracted (score: ${engagementScore})`,
+                      });
+                    }
+                  } catch (e) { }
                 }
                 next[studentIndex] = engagementScore;
               });
