@@ -104,61 +104,78 @@ const JoinForm = memo(({ sessionId, onJoined }) => {
 
 // ── Active camera view ─────────────────────────────────────────────────────────
 function ActiveView({ sessionId, studentIndex, myName }) {
+  const [score, setScore]         = useState(null);
+  const [camStatus, setCamStatus] = useState("requesting");
+  const [needsTap, setNeedsTap]   = useState(false);
+  const [errorMsg, setErrorMsg]   = useState("");
+
   const videoRef   = useRef(null);
   const canvasRef  = useRef(null);
   const streamRef  = useRef(null);
-  const [score, setScore]       = useState(null);
-  const [camError, setCamError] = useState(null);
-  const [phase, setPhase]       = useState("starting");
+  const captureRef = useRef(null);
+  const sendRef    = useRef(null);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
-    let captureInterval, sendInterval;
-    const frames = [];
+    mountedRef.current = true;
 
     const startCamera = async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            width: { ideal: 640 },
-            height: { ideal: 480 },
-            facingMode: "user",
-          },
+          video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" },
           audio: false,
         });
 
-        streamRef.current = stream;
-        const video = videoRef.current;
+        if (!mountedRef.current) { stream.getTracks().forEach(t => t.stop()); return; }
 
-        if (video) {
+        streamRef.current = stream;
+
+        // Poll until video element is in DOM — solves Android timing issue
+        const attachWhenReady = () => {
+          const video = videoRef.current;
+          if (!video) { setTimeout(attachWhenReady, 100); return; }
+
           video.srcObject = stream;
-          video.setAttribute("playsinline", true);
-          video.setAttribute("muted", true);
           video.muted = true;
 
-          // Explicit play() needed on mobile
-          try {
-            await video.play();
-          } catch (playErr) {
-            console.warn("Autoplay blocked:", playErr.message);
-          }
-        }
+          video.onloadedmetadata = async () => {
+            try {
+              await video.play();
+              if (mountedRef.current) setCamStatus("active");
+            } catch (e) {
+              // iOS Safari blocks autoplay
+              if (mountedRef.current) { setCamStatus("active"); setNeedsTap(true); }
+            }
+          };
 
-        setPhase("active");
+          // Fallback if onloadedmetadata doesn't fire
+          setTimeout(() => {
+            if (mountedRef.current && camStatus !== "active") {
+              video.play().catch(() => setNeedsTap(true));
+              setCamStatus("active");
+            }
+          }, 2000);
+        };
 
-        captureInterval = setInterval(() => {
-          const v = videoRef.current;
-          if (!v || v.readyState < 2 || v.videoWidth === 0) return;
+        attachWhenReady();
+
+        // Start frame capture
+        const frames = [];
+
+        captureRef.current = setInterval(() => {
+          const video = videoRef.current;
+          if (!video || video.readyState < 2 || video.videoWidth === 0) return;
           if (!canvasRef.current) canvasRef.current = document.createElement("canvas");
           const canvas = canvasRef.current;
           canvas.width = 320; canvas.height = 240;
           const ctx = canvas.getContext("2d");
           if (!ctx) return;
-          ctx.drawImage(v, 0, 0, 320, 240);
-          const frame = canvas.toDataURL("image/jpeg", 0.7).split(",")[1];
+          ctx.drawImage(video, 0, 0, 320, 240);
+          const frame = canvas.toDataURL("image/jpeg", 0.65).split(",")[1];
           if (frame) frames.push(frame);
         }, 1000);
 
-        sendInterval = setInterval(async () => {
+        sendRef.current = setInterval(async () => {
           if (!frames.length) return;
           const frame = frames[frames.length - 1];
           frames.length = 0;
@@ -166,35 +183,42 @@ function ActiveView({ sessionId, studentIndex, myName }) {
             const { data } = await publicApi.post(`/sessions/${sessionId}/frames`, {
               frames: [{ studentIndex, frame }],
             });
-            setScore(data.scores?.[0]?.engagementScore ?? null);
+            if (mountedRef.current) setScore(data.scores?.[0]?.engagementScore ?? null);
           } catch (err) {
-            if (err.response?.status === 404) {
-              setPhase("ended");
+            if (err.response?.status === 404 && mountedRef.current) {
+              setCamStatus("ended");
               stream.getTracks().forEach(t => t.stop());
-              clearInterval(captureInterval);
-              clearInterval(sendInterval);
+              clearInterval(captureRef.current);
+              clearInterval(sendRef.current);
             }
           }
         }, 5000);
 
       } catch (err) {
-        setCamError(
-          err.name === "NotAllowedError"
-            ? "Camera permission denied. Tap the camera icon in your browser address bar and allow access, then refresh."
-            : `Camera error: ${err.message}`
-        );
-        setPhase("error");
+        if (!mountedRef.current) return;
+        if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+          setCamStatus("denied");
+        } else {
+          setCamStatus("error");
+          setErrorMsg(err.message);
+        }
       }
     };
 
     startCamera();
 
     return () => {
-      clearInterval(captureInterval);
-      clearInterval(sendInterval);
+      mountedRef.current = false;
+      clearInterval(captureRef.current);
+      clearInterval(sendRef.current);
       streamRef.current?.getTracks().forEach(t => t.stop());
     };
-  }, [sessionId, studentIndex]);
+  }, []);
+
+  const handleTapToPlay = () => {
+    videoRef.current?.play().catch(() => {});
+    setNeedsTap(false);
+  };
 
   const scoreColor = score === null ? "#6B7280"
     : score >= 70 ? "#00FF87"
@@ -206,7 +230,7 @@ function ActiveView({ sessionId, studentIndex, myName }) {
     : score >= 40 ? "Try to stay focused"
     : "Your tutor has been notified ⚠";
 
-  if (phase === "ended") return (
+  if (camStatus === "ended") return (
     <div className="card max-w-sm w-full text-center">
       <div className="text-5xl mb-4">🔒</div>
       <h2 className="font-bold text-xl mb-2" style={{ fontFamily: "Syne,sans-serif" }}>Session ended</h2>
@@ -214,49 +238,101 @@ function ActiveView({ sessionId, studentIndex, myName }) {
     </div>
   );
 
-  if (phase === "error") return (
+  if (camStatus === "denied") return (
+    <div className="card max-w-sm w-full">
+      <div className="text-4xl mb-4 text-center">📷</div>
+      <h2 className="font-bold text-lg mb-3 text-center" style={{ fontFamily: "Syne,sans-serif" }}>
+        Camera access needed
+      </h2>
+      <ol className="text-sm text-gray-400 space-y-3 mb-5">
+        <li className="flex gap-3">
+          <span className="font-mono text-white shrink-0">1.</span>
+          Tap the 🔒 icon in your browser address bar
+        </li>
+        <li className="flex gap-3">
+          <span className="font-mono text-white shrink-0">2.</span>
+          Find <strong>Camera</strong> → set to <span style={{ color: "#00FF87" }}>Allow</span>
+        </li>
+        <li className="flex gap-3">
+          <span className="font-mono text-white shrink-0">3.</span>
+          Come back and refresh this page
+        </li>
+      </ol>
+      <button onClick={() => window.location.reload()} className="btn-primary w-full py-3">
+        Refresh page
+      </button>
+    </div>
+  );
+
+  if (camStatus === "error") return (
     <div className="card max-w-sm w-full text-center">
-      <div className="text-4xl mb-3">🚫</div>
-      <p className="text-gray-300 text-sm">{camError}</p>
-      <button
-        onClick={() => window.location.reload()}
-        className="btn-primary text-sm mt-4 px-6"
-      >
+      <div className="text-4xl mb-3">⚠️</div>
+      <p className="text-gray-300 text-sm mb-4">Camera error: {errorMsg}</p>
+      <button onClick={() => window.location.reload()} className="btn-primary w-full py-2">
         Try again
       </button>
     </div>
   );
 
-  if (phase === "starting") return (
+  if (camStatus === "requesting") return (
     <div className="card max-w-sm w-full text-center">
-      <span className="animate-spin w-6 h-6 border-2 border-[#00FF87] border-t-transparent rounded-full inline-block mb-3" />
-      <p className="text-gray-300 text-sm">Starting camera…</p>
-      <p className="text-gray-600 text-xs mt-1 font-mono">Allow camera access when prompted</p>
+      <span className="animate-spin w-8 h-8 border-2 border-[#00FF87] border-t-transparent rounded-full inline-block mb-4" />
+      <p className="text-gray-300 text-sm font-medium">Starting camera…</p>
+      <p className="text-gray-600 text-xs mt-2 font-mono">Tap Allow when your browser asks</p>
     </div>
   );
 
   return (
     <div className="w-full max-w-sm space-y-4">
       <div className="flex items-center justify-between px-1">
-        <p className="font-medium text-white text-sm">{myName}</p>
+        <p className="font-medium text-white">{myName}</p>
         <div className="flex items-center gap-1.5 text-xs font-mono" style={{ color: "#00FF87" }}>
-          <span className="w-1.5 h-1.5 bg-[#00FF87] rounded-full animate-pulse" />Live
+          <span className="w-1.5 h-1.5 bg-[#00FF87] rounded-full animate-pulse" />
+          Live
         </div>
       </div>
 
-      {/* Camera — critical mobile attributes */}
-      <div className="relative rounded-xl overflow-hidden"
-        style={{ border: score !== null && score < 40 ? "1px solid rgba(255,69,69,0.5)" : "1px solid #21262D" }}>
+      {/* Video container */}
+      <div
+        className="relative rounded-xl overflow-hidden"
+        style={{
+          border: score !== null && score < 40
+            ? "1px solid rgba(255,69,69,0.6)"
+            : "1px solid #21262D",
+          background: "#0D1117",
+          minHeight: "240px",
+        }}
+      >
         <video
           ref={videoRef}
           autoPlay
           playsInline
           muted
-          className="w-full aspect-video object-cover bg-[#0D1117]"
-          style={{ minHeight: "200px" }}
+          style={{
+            width: "100%",
+            display: "block",
+            minHeight: "240px",
+            objectFit: "cover",
+          }}
         />
-        <div className="absolute bottom-3 right-3 px-3 py-2 rounded-xl text-center"
-          style={{ background: "rgba(13,17,23,0.92)", border: "1px solid #21262D" }}>
+
+        {/* iOS tap-to-play overlay */}
+        {needsTap && (
+          <div
+            className="absolute inset-0 flex flex-col items-center justify-center cursor-pointer"
+            style={{ background: "rgba(13,17,23,0.9)" }}
+            onClick={handleTapToPlay}
+          >
+            <div className="text-6xl mb-3">▶️</div>
+            <p className="text-white text-sm font-medium">Tap to start camera</p>
+          </div>
+        )}
+
+        {/* Score badge */}
+        <div
+          className="absolute bottom-3 right-3 px-3 py-2 rounded-xl text-center"
+          style={{ background: "rgba(13,17,23,0.92)", border: "1px solid #21262D" }}
+        >
           <p className="font-mono font-bold text-3xl leading-none" style={{ color: scoreColor }}>
             {score ?? "—"}
           </p>
@@ -266,15 +342,20 @@ function ActiveView({ sessionId, studentIndex, myName }) {
         </div>
       </div>
 
+      {/* Score bar */}
       {score !== null && (
         <div className="rounded-xl p-4" style={{ background: "#161B22", border: "1px solid #21262D" }}>
           <div className="flex justify-between items-center mb-2">
             <span className="text-xs font-mono text-gray-500">Your engagement</span>
-            <span className="font-mono font-bold text-sm" style={{ color: scoreColor }}>{score}/100</span>
+            <span className="font-mono font-bold text-sm" style={{ color: scoreColor }}>
+              {score}/100
+            </span>
           </div>
           <div className="bg-[#21262D] rounded-full h-2 overflow-hidden">
-            <div className="h-full rounded-full transition-all duration-700"
-              style={{ width: `${score}%`, background: scoreColor }} />
+            <div
+              className="h-full rounded-full transition-all duration-700"
+              style={{ width: `${score}%`, background: scoreColor }}
+            />
           </div>
           <p className="text-[10px] text-gray-600 mt-2 text-center font-mono">{scoreLabel}</p>
         </div>
