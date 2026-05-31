@@ -24,7 +24,7 @@ router.post("/start", requireAuth, requireCredits, async (req, res) => {
   }
 });
 
-router.post("/:id/frames", requireAuth, async (req, res) => {
+router.post("/:id/frames", async (req, res) => {
   const { frames } = req.body;
   if (!Array.isArray(frames) || frames.length === 0) return res.status(400).json({ error: "frames array required" });
   let session;
