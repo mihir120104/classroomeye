@@ -117,103 +117,107 @@ function ActiveView({ sessionId, studentIndex, myName }) {
   const mountedRef = useRef(true);
 
   useEffect(() => {
-    mountedRef.current = true;
+  mountedRef.current = true;
+  const frames = [];
 
-    const startCamera = async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" },
-          audio: false,
-        });
+  const startCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
+        audio: false,
+      });
 
-        if (!mountedRef.current) { stream.getTracks().forEach(t => t.stop()); return; }
+      if (!mountedRef.current) { stream.getTracks().forEach(t => t.stop()); return; }
 
-        streamRef.current = stream;
+      streamRef.current = stream;
 
-        // Poll until video element is in DOM — solves Android timing issue
-        const attachWhenReady = () => {
-          const video = videoRef.current;
-          if (!video) { setTimeout(attachWhenReady, 100); return; }
-
+      // Try attaching immediately
+      const tryAttach = () => {
+        const video = videoRef.current;
+        if (video) {
           video.srcObject = stream;
           video.muted = true;
+          // Force play — don't wait for any events
+          const playPromise = video.play();
+          if (playPromise) {
+            playPromise.catch(() => {
+              if (mountedRef.current) setNeedsTap(true);
+            });
+          }
+        }
+      };
 
-          video.onloadedmetadata = async () => {
-            try {
-              await video.play();
-              if (mountedRef.current) setCamStatus("active");
-            } catch (e) {
-              // iOS Safari blocks autoplay
-              if (mountedRef.current) { setCamStatus("active"); setNeedsTap(true); }
-            }
-          };
+      // Try now, and again after 200ms, 500ms, 1000ms as fallbacks
+      tryAttach();
+      setTimeout(tryAttach, 200);
+      setTimeout(tryAttach, 500);
+      setTimeout(tryAttach, 1000);
 
-          // Fallback if onloadedmetadata doesn't fire
-          setTimeout(() => {
-            if (mountedRef.current && camStatus !== "active") {
-              video.play().catch(() => setNeedsTap(true));
-              setCamStatus("active");
-            }
-          }, 2000);
-        };
+      // Move to active state immediately — don't wait for video to play
+      if (mountedRef.current) setCamStatus("active");
 
-        attachWhenReady();
-
-        // Start frame capture
-        const frames = [];
-
-        captureRef.current = setInterval(() => {
-          const video = videoRef.current;
-          if (!video || video.readyState < 2 || video.videoWidth === 0) return;
-          if (!canvasRef.current) canvasRef.current = document.createElement("canvas");
-          const canvas = canvasRef.current;
-          canvas.width = 320; canvas.height = 240;
-          const ctx = canvas.getContext("2d");
-          if (!ctx) return;
+      // Start capturing frames
+      captureRef.current = setInterval(() => {
+        const video = videoRef.current;
+        if (!video || !streamRef.current) return;
+        // Accept any readyState >= 1 on mobile (HAVE_METADATA is enough)
+        if (video.readyState < 1) return;
+        if (!canvasRef.current) canvasRef.current = document.createElement("canvas");
+        const canvas = canvasRef.current;
+        canvas.width = 320;
+        canvas.height = 240;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        try {
           ctx.drawImage(video, 0, 0, 320, 240);
           const frame = canvas.toDataURL("image/jpeg", 0.65).split(",")[1];
-          if (frame) frames.push(frame);
-        }, 1000);
-
-        sendRef.current = setInterval(async () => {
-          if (!frames.length) return;
-          const frame = frames[frames.length - 1];
-          frames.length = 0;
-          try {
-            const { data } = await publicApi.post(`/sessions/${sessionId}/frames`, {
-              frames: [{ studentIndex, frame }],
-            });
-            if (mountedRef.current) setScore(data.scores?.[0]?.engagementScore ?? null);
-          } catch (err) {
-            if (err.response?.status === 404 && mountedRef.current) {
-              setCamStatus("ended");
-              stream.getTracks().forEach(t => t.stop());
-              clearInterval(captureRef.current);
-              clearInterval(sendRef.current);
-            }
-          }
-        }, 5000);
-
-      } catch (err) {
-        if (!mountedRef.current) return;
-        if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
-          setCamStatus("denied");
-        } else {
-          setCamStatus("error");
-          setErrorMsg(err.message);
+          if (frame && frame.length > 100) frames.push(frame);
+        } catch (e) {
+          // drawImage fails if video not ready — skip silently
         }
+      }, 1000);
+
+      sendRef.current = setInterval(async () => {
+        if (!frames.length) return;
+        const frame = frames[frames.length - 1];
+        frames.length = 0;
+        try {
+          const { data } = await publicApi.post(`/sessions/${sessionId}/frames`, {
+            frames: [{ studentIndex, frame }],
+          });
+          if (mountedRef.current) {
+            setScore(data.scores?.[0]?.engagementScore ?? null);
+          }
+        } catch (err) {
+          if (err.response?.status === 404 && mountedRef.current) {
+            setCamStatus("ended");
+            stream.getTracks().forEach(t => t.stop());
+            clearInterval(captureRef.current);
+            clearInterval(sendRef.current);
+          }
+        }
+      }, 5000);
+
+    } catch (err) {
+      if (!mountedRef.current) return;
+      if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+        setCamStatus("denied");
+      } else {
+        setCamStatus("error");
+        setErrorMsg(err.message);
       }
-    };
+    }
+  };
 
-    startCamera();
+  startCamera();
 
-    return () => {
-      mountedRef.current = false;
-      clearInterval(captureRef.current);
-      clearInterval(sendRef.current);
-      streamRef.current?.getTracks().forEach(t => t.stop());
-    };
-  }, []);
+  return () => {
+    mountedRef.current = false;
+    clearInterval(captureRef.current);
+    clearInterval(sendRef.current);
+    streamRef.current?.getTracks().forEach(t => t.stop());
+  };
+}, []);
 
   const handleTapToPlay = () => {
     videoRef.current?.play().catch(() => {});
@@ -274,13 +278,84 @@ function ActiveView({ sessionId, studentIndex, myName }) {
     </div>
   );
 
-  if (camStatus === "requesting") return (
-    <div className="card max-w-sm w-full text-center">
-      <span className="animate-spin w-8 h-8 border-2 border-[#00FF87] border-t-transparent rounded-full inline-block mb-4" />
-      <p className="text-gray-300 text-sm font-medium">Starting camera…</p>
-      <p className="text-gray-600 text-xs mt-2 font-mono">Tap Allow when your browser asks</p>
+  if (camStatus === "requesting" || camStatus === "active") 
+   return (
+  <div className="w-full max-w-sm space-y-4">
+    <div className="flex items-center justify-between px-1">
+      <p className="font-medium text-white">{myName}</p>
+      <div className="flex items-center gap-1.5 text-xs font-mono" style={{ color: "#00FF87" }}>
+        <span className="w-1.5 h-1.5 bg-[#00FF87] rounded-full animate-pulse" />
+        {camStatus === "requesting" ? "Starting…" : "Live"}
+      </div>
     </div>
-  );
+
+    <div className="relative rounded-xl overflow-hidden"
+      style={{
+        border: score !== null && score < 40 ? "1px solid rgba(255,69,69,0.6)" : "1px solid #21262D",
+        background: "#0D1117",
+        minHeight: "260px",
+      }}>
+
+      {/* Video always in DOM */}
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted
+        style={{ width: "100%", display: "block", minHeight: "260px", objectFit: "cover" }}
+      />
+
+      {/* Loading overlay — disappears once video plays */}
+      {camStatus === "requesting" && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center"
+          style={{ background: "rgba(13,17,23,0.9)" }}>
+          <span className="animate-spin w-8 h-8 border-2 border-[#00FF87] border-t-transparent rounded-full mb-3" />
+          <p className="text-gray-300 text-sm">Camera starting…</p>
+          <p className="text-gray-600 text-xs mt-1 font-mono">Tap Allow when browser asks</p>
+        </div>
+      )}
+
+      {/* iOS tap-to-play */}
+      {needsTap && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center cursor-pointer"
+          style={{ background: "rgba(13,17,23,0.85)" }}
+          onClick={handleTapToPlay}>
+          <div className="text-6xl mb-3">▶️</div>
+          <p className="text-white text-sm font-medium">Tap to start camera</p>
+        </div>
+      )}
+
+      {/* Score badge */}
+      <div className="absolute bottom-3 right-3 px-3 py-2 rounded-xl text-center"
+        style={{ background: "rgba(13,17,23,0.92)", border: "1px solid #21262D" }}>
+        <p className="font-mono font-bold text-3xl leading-none" style={{ color: scoreColor }}>
+          {score ?? "—"}
+        </p>
+        <p className="text-[10px] text-gray-500 mt-0.5">
+          {score === null ? "waiting…" : "/100"}
+        </p>
+      </div>
+    </div>
+
+    {score !== null && (
+      <div className="rounded-xl p-4" style={{ background: "#161B22", border: "1px solid #21262D" }}>
+        <div className="flex justify-between items-center mb-2">
+          <span className="text-xs font-mono text-gray-500">Your engagement</span>
+          <span className="font-mono font-bold text-sm" style={{ color: scoreColor }}>{score}/100</span>
+        </div>
+        <div className="bg-[#21262D] rounded-full h-2 overflow-hidden">
+          <div className="h-full rounded-full transition-all duration-700"
+            style={{ width: `${score}%`, background: scoreColor }} />
+        </div>
+        <p className="text-[10px] text-gray-600 mt-2 text-center font-mono">{scoreLabel}</p>
+      </div>
+    )}
+
+    <p className="text-center text-xs text-gray-700 font-mono">
+      Keep this tab open for the entire session
+    </p>
+  </div>
+);
 
   return (
     <div className="w-full max-w-sm space-y-4">
