@@ -30,7 +30,7 @@ function fireNotification(title, body) {
     if (typeof Notification !== "undefined" && Notification.permission === "granted") {
       new Notification(title, { body });
     }
-  } catch (e) {}
+  } catch (e) { }
 }
 
 function requestNotificationPermission() {
@@ -38,7 +38,7 @@ function requestNotificationPermission() {
     if (typeof Notification !== "undefined" && Notification.permission === "default") {
       Notification.requestPermission();
     }
-  } catch (e) {}
+  } catch (e) { }
 }
 
 export default function Session() {
@@ -46,23 +46,26 @@ export default function Session() {
   const navigate = useNavigate();
 
   const [sessionData, setSessionData] = useState(null);
-  const [loadError, setLoadError]     = useState(null);
-  const [ending, setEnding]           = useState(false);
-  const [elapsed, setElapsed]         = useState(0);
-  const [scores, setScores]           = useState({});
-  const [camError, setCamError]       = useState(null);
+  const [loadError, setLoadError] = useState(null);
+  const [ending, setEnding] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const [scores, setScores] = useState({});
+  const [camError, setCamError] = useState(null);
   const [isCapturing, setIsCapturing] = useState(false);
-  const [showLinks, setShowLinks]     = useState(true);
-
+  const [showLinks, setShowLinks] = useState(true);
+  const [micOn, setMicOn] = useState(false);
+  const [screenSharing, setScreenSharing] = useState(false);
+  const micStreamRef = useRef(null);
+  const screenStreamRef = useRef(null);
   // All refs — NO document.createElement at init time
-  const videoRef     = useRef(null);
-  const canvasRef    = useRef(null);   // created lazily inside interval
-  const streamRef    = useRef(null);
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);   // created lazily inside interval
+  const streamRef = useRef(null);
   const captureTimer = useRef(null);
-  const sendTimer    = useRef(null);
-  const framesRef    = useRef([]);
+  const sendTimer = useRef(null);
+  const framesRef = useRef([]);
   const elapsedTimer = useRef(null);
-  const scoresRef    = useRef({});     // mirror of scores for use inside closures
+  const scoresRef = useRef({});     // mirror of scores for use inside closures
 
   // Keep scoresRef in sync
   useEffect(() => { scoresRef.current = scores; }, [scores]);
@@ -165,13 +168,55 @@ export default function Session() {
     };
   }, [sessionData, id]);
 
+  const toggleMic = async () => {
+    if (micOn) {
+      micStreamRef.current?.getTracks().forEach(t => t.stop());
+      micStreamRef.current = null;
+      setMicOn(false);
+    } else {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        micStreamRef.current = stream;
+        setMicOn(true);
+      } catch {
+        alert("Microphone permission denied. Allow mic access in browser settings.");
+      }
+    }
+  };
+
+  const toggleScreenShare = async () => {
+    if (screenSharing) {
+      screenStreamRef.current?.getTracks().forEach(t => t.stop());
+      screenStreamRef.current = null;
+      setScreenSharing(false);
+    } else {
+      try {
+        const stream = await navigator.mediaDevices.getDisplayMedia({
+          video: { cursor: "always" },
+          audio: true,
+        });
+        screenStreamRef.current = stream;
+        setScreenSharing(true);
+        // Auto-stop when user clicks browser's "Stop sharing" button
+        stream.getVideoTracks()[0].onended = () => {
+          screenStreamRef.current = null;
+          setScreenSharing(false);
+        };
+      } catch {
+        // User cancelled — not an error
+      }
+    }
+  };
+
   const handleEnd = async () => {
     setEnding(true);
     clearInterval(captureTimer.current);
     clearInterval(sendTimer.current);
     clearInterval(elapsedTimer.current);
     streamRef.current?.getTracks().forEach(t => t.stop());
-    try { await api.post(`/sessions/${id}/end`); } catch {}
+    micStreamRef.current?.getTracks().forEach(t => t.stop());      // ← add
+    screenStreamRef.current?.getTracks().forEach(t => t.stop());   // ← add
+    try { await api.post(`/sessions/${id}/end`); } catch { }
     navigate(`/session/${id}/report`);
   };
 
@@ -242,13 +287,43 @@ export default function Session() {
             <span className="text-xs text-gray-600 font-mono">{students.length} students</span>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             {avgScore !== null && (
               <div className="text-center px-2">
                 <span className="font-mono font-medium text-lg text-white">{avgScore}</span>
                 <span className="text-xs text-gray-600 ml-1">avg</span>
               </div>
             )}
+
+            {/* Mic button */}
+            <button
+              onClick={toggleMic}
+              title={micOn ? "Mute microphone" : "Unmute microphone"}
+              className="px-3 py-1.5 rounded-lg text-xs font-mono transition-all flex items-center gap-1.5"
+              style={{
+                background: micOn ? "rgba(0,255,135,0.1)" : "rgba(255,69,69,0.1)",
+                border: micOn ? "1px solid rgba(0,255,135,0.3)" : "1px solid rgba(255,69,69,0.3)",
+                color: micOn ? "#00FF87" : "#FF4545",
+              }}
+            >
+              {micOn ? "🎙 Mic on" : "🔇 Mic off"}
+            </button>
+
+            {/* Screen share button */}
+            <button
+              onClick={toggleScreenShare}
+              title={screenSharing ? "Stop sharing screen" : "Share your screen"}
+              className="px-3 py-1.5 rounded-lg text-xs font-mono transition-all flex items-center gap-1.5"
+              style={{
+                background: screenSharing ? "rgba(59,130,246,0.1)" : "rgba(255,255,255,0.05)",
+                border: screenSharing ? "1px solid rgba(59,130,246,0.5)" : "1px solid #30363D",
+                color: screenSharing ? "#3B82F6" : "#9CA3AF",
+              }}
+            >
+              {screenSharing ? "🖥 Sharing" : "🖥 Share screen"}
+            </button>
+
+            {/* Share links toggle */}
             <button
               onClick={() => setShowLinks(v => !v)}
               className="px-3 py-1.5 rounded-lg text-xs font-mono transition-all"
@@ -260,6 +335,8 @@ export default function Session() {
             >
               🔗 {showLinks ? "Hide" : "Links"}
             </button>
+
+            {/* End session */}
             <button
               onClick={handleEnd}
               disabled={ending}
@@ -330,7 +407,7 @@ export default function Session() {
                   const dotColor = s === undefined ? "#6B7280" : s > 0 ? "#00FF87" : "#FF4545";
                   const statusText = s === undefined ? "Waiting…"
                     : s > 0 ? `${s}/100`
-                    : "No score yet";
+                      : "No score yet";
                   return (
                     <div key={idx} className="flex items-center gap-2 px-3 py-2 rounded-lg"
                       style={{ background: "#161B22", border: "1px solid #21262D" }}>
