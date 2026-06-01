@@ -26,23 +26,29 @@ router.post("/start", requireAuth, requireCredits, async (req, res) => {
 
 router.post("/:id/frames", async (req, res) => {
   const { frames } = req.body;
-  if (!Array.isArray(frames) || frames.length === 0) return res.status(400).json({ error: "frames array required" });
+  if (!Array.isArray(frames) || frames.length === 0) {
+    return res.status(400).json({ error: "frames array required" });
+  }
+
   let session;
   try {
-    session = await Session.findOne({ _id: req.params.id, tutorId: req.user._id, status: "live" });
+    // No auth required — session ID is the only key needed
+    session = await Session.findOne({ _id: req.params.id, status: "live" });
     if (!session) return res.status(404).json({ error: "Live session not found" });
-  } catch { return res.status(400).json({ error: "Invalid session ID" }); }
+  } catch {
+    return res.status(400).json({ error: "Invalid session ID" });
+  }
 
   let aiResults;
   try {
-    const { data } = await axios.post(`${AI_URL()}/analyze/batch`,
+    const { data } = await axios.post(
+      `${AI_URL()}/analyze/batch`,
       { frames: frames.map((f) => ({ frame: f.frame, student_id: String(f.studentIndex) })) },
       { timeout: 10000 }
     );
     aiResults = data.results;
   } catch (err) {
     logger.warn("AI service error:", err.message);
-    // Return zero scores instead of 502 so frontend updates
     const fallbackScores = frames.map((f, idx) => ({
       studentIndex: idx,
       engagementScore: 0,
@@ -55,14 +61,35 @@ router.post("/:id/frames", async (req, res) => {
 
   const now = new Date();
   session.timeline.push({ timestamp: now, scores: aiResults.map((r) => r.engagement_score ?? 0) });
+
   aiResults.forEach((result, idx) => {
     const student = session.students[idx];
     if (!student) return;
-    student.engagementTimeline.push({ timestamp: now, score: result.engagement_score, yaw: result.yaw, pitch: result.pitch, eyeOpenness: result.eye_openness, isPresent: result.is_present });
-    if (result.engagement_score < 40 && result.is_present) student.attentionDrops.push(now);
+    student.engagementTimeline.push({
+      timestamp: now,
+      score: result.engagement_score,
+      yaw: result.yaw,
+      pitch: result.pitch,
+      eyeOpenness: result.eye_openness,
+      isPresent: result.is_present,
+    });
+    if (result.engagement_score < 40 && result.is_present) {
+      student.attentionDrops.push(now);
+    }
   });
+
   session.save().catch((e) => logger.error("Session save error:", e));
-  res.json({ timestamp: now, scores: aiResults.map((r, idx) => ({ studentIndex: idx, engagementScore: r.engagement_score, isPresent: r.is_present, yaw: r.yaw, pitch: r.pitch })) });
+
+  res.json({
+    timestamp: now,
+    scores: aiResults.map((r, idx) => ({
+      studentIndex: idx,
+      engagementScore: r.engagement_score,
+      isPresent: r.is_present,
+      yaw: r.yaw,
+      pitch: r.pitch,
+    })),
+  });
 });
 
 router.post("/:id/end", requireAuth, async (req, res) => {
