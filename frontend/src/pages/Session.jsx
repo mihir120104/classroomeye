@@ -91,6 +91,39 @@ export default function Session() {
     return () => clearInterval(elapsedTimer.current);
   }, []);
 
+  useEffect(() => {
+    if (!sessionData || sessionData.status === "completed") return;
+
+    const pollScores = async () => {
+      try {
+        const { data } = await api.get(`/sessions/${id}`);
+        const session = data.session;
+        if (!session?.students) return;
+
+        setScores(prev => {
+          const next = { ...prev };
+          session.students.forEach((student, idx) => {
+            const timeline = student.engagementTimeline;
+            if (timeline && timeline.length > 0) {
+              const latest = timeline[timeline.length - 1];
+              if (latest.score !== undefined && latest.score !== null) {
+                next[idx] = latest.score;
+              }
+            }
+          });
+          return next;
+        });
+      } catch (e) {
+        // Silent fail
+      }
+    };
+
+    const pollInterval = setInterval(pollScores, 5000);
+    pollScores(); // run immediately on mount
+
+    return () => clearInterval(pollInterval);
+  }, [sessionData, id]);
+
   // Camera
   useEffect(() => {
     if (!sessionData || isCapturing) return;

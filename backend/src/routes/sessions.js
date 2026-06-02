@@ -139,10 +139,28 @@ router.get("/", requireAuth, async (req, res) => {
 
 router.get("/:id", requireAuth, async (req, res) => {
   try {
-    const session = await Session.findOne({ _id: req.params.id, tutorId: req.user._id }).lean();
+    let session = await Session.findOne({
+      _id: req.params.id,
+      tutorId: req.user._id,
+    }).lean();
     if (!session) return res.status(404).json({ error: "Session not found" });
+
+    // Auto-end sessions older than 4 hours that are still "live"
+    if (session.status === "live" && session.startTime) {
+      const ageHours = (Date.now() - new Date(session.startTime).getTime()) / 3600000;
+      if (ageHours > 4) {
+        await Session.findByIdAndUpdate(session._id, {
+          status: "completed",
+          endTime: new Date(),
+        });
+        session = { ...session, status: "completed" };
+      }
+    }
+
     res.json({ session });
-  } catch { res.status(400).json({ error: "Invalid session ID" }); }
+  } catch {
+    res.status(400).json({ error: "Invalid session ID" });
+  }
 });
 
 router.post("/:id/join", async (req, res) => {
