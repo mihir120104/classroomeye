@@ -24,6 +24,7 @@ router.post("/start", requireAuth, requireCredits, async (req, res) => {
   }
 });
 
+// POST /api/sessions/:id/frames
 router.post("/:id/frames", async (req, res) => {
   const { frames } = req.body;
   if (!Array.isArray(frames) || frames.length === 0) {
@@ -32,7 +33,6 @@ router.post("/:id/frames", async (req, res) => {
 
   let session;
   try {
-    // No auth required — session ID is the only key needed
     session = await Session.findOne({ _id: req.params.id, status: "live" });
     if (!session) return res.status(404).json({ error: "Live session not found" });
   } catch {
@@ -49,22 +49,30 @@ router.post("/:id/frames", async (req, res) => {
     aiResults = data.results;
   } catch (err) {
     logger.warn("AI service error:", err.message);
-    const fallbackScores = frames.map((f, idx) => ({
-      studentIndex: idx,
-      engagementScore: 0,
-      isPresent: false,
-      yaw: 0,
-      pitch: 0,
-    }));
-    return res.json({ timestamp: new Date(), scores: fallbackScores });
+    return res.json({
+      timestamp: new Date(),
+      scores: frames.map((f) => ({
+        studentIndex: f.studentIndex,
+        engagementScore: 0,
+        isPresent: false,
+        yaw: 0,
+        pitch: 0,
+      })),
+    });
   }
 
   const now = new Date();
-  session.timeline.push({ timestamp: now, scores: aiResults.map((r) => r.engagement_score ?? 0) });
+
+  // Build snapshot — use actual studentIndex from each frame request
+  const snapshotScores = new Array(session.students.length).fill(0);
 
   aiResults.forEach((result, idx) => {
-    const student = session.students[idx];
+    // Use the studentIndex from the original frame request — NOT the loop index
+    const studentIdx = frames[idx]?.studentIndex ?? idx;
+    const student = session.students[studentIdx];
     if (!student) return;
+
+    // Save to correct student's timeline
     student.engagementTimeline.push({
       timestamp: now,
       score: result.engagement_score,
@@ -73,21 +81,25 @@ router.post("/:id/frames", async (req, res) => {
       eyeOpenness: result.eye_openness,
       isPresent: result.is_present,
     });
+
     if (result.engagement_score < 40 && result.is_present) {
       student.attentionDrops.push(now);
     }
+
+    snapshotScores[studentIdx] = result.engagement_score ?? 0;
   });
 
+  session.timeline.push({ timestamp: now, scores: snapshotScores });
   session.save().catch((e) => logger.error("Session save error:", e));
 
   res.json({
     timestamp: now,
-    scores: aiResults.map((r, idx) => ({
-      studentIndex: idx,
-      engagementScore: r.engagement_score,
-      isPresent: r.is_present,
-      yaw: r.yaw,
-      pitch: r.pitch,
+    scores: aiResults.map((result, idx) => ({
+      studentIndex: frames[idx]?.studentIndex ?? idx,
+      engagementScore: Math.round(result.engagement_score),
+      isPresent: result.is_present,
+      yaw: result.yaw,
+      pitch: result.pitch,
     })),
   });
 });

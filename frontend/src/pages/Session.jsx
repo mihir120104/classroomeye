@@ -26,7 +26,7 @@ function fireNotification(title, body) {
     if (typeof Notification !== "undefined" && Notification.permission === "granted") {
       new Notification(title, { body });
     }
-  } catch (e) {}
+  } catch (e) { }
 }
 
 export default function Session() {
@@ -34,26 +34,26 @@ export default function Session() {
   const navigate = useNavigate();
 
   const [sessionData, setSessionData] = useState(null);
-  const [loadError, setLoadError]     = useState(null);
-  const [ending, setEnding]           = useState(false);
-  const [elapsed, setElapsed]         = useState(0);
-  const [scores, setScores]           = useState({});
-  const [camError, setCamError]       = useState(null);
+  const [loadError, setLoadError] = useState(null);
+  const [ending, setEnding] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const [scores, setScores] = useState({});
+  const [camError, setCamError] = useState(null);
   const [isCapturing, setIsCapturing] = useState(false);
-  const [showLinks, setShowLinks]     = useState(true);
-  const [micOn, setMicOn]             = useState(false);
+  const [showLinks, setShowLinks] = useState(true);
+  const [micOn, setMicOn] = useState(false);
   const [screenSharing, setScreenSharing] = useState(false);
 
-  const videoRef     = useRef(null);
-  const canvasRef    = useRef(null);
-  const streamRef    = useRef(null);
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const streamRef = useRef(null);
   const captureTimer = useRef(null);
-  const sendTimer    = useRef(null);
+  const sendTimer = useRef(null);
   const elapsedTimer = useRef(null);
-  const pollTimer    = useRef(null);
-  const micStreamRef    = useRef(null);
+  const pollTimer = useRef(null);
+  const micStreamRef = useRef(null);
   const screenStreamRef = useRef(null);
-  const framesRef    = useRef([]);
+  const framesRef = useRef([]);
 
   // Load session on mount
   useEffect(() => {
@@ -132,7 +132,7 @@ export default function Session() {
     setCamError(null);
     try {
       if (typeof Notification !== "undefined" && Notification.permission === "default") {
-        Notification.requestPermission().catch(() => {});
+        Notification.requestPermission().catch(() => { });
       }
 
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -185,8 +185,8 @@ export default function Session() {
     } catch (err) {
       setCamError(
         err.name === "NotAllowedError" ? "Camera permission denied — allow access and refresh"
-        : err.name === "NotReadableError" ? "Camera in use by another app — close Zoom/Meet and retry"
-        : `Camera error: ${err.message}`
+          : err.name === "NotReadableError" ? "Camera in use by another app — close Zoom/Meet and retry"
+            : `Camera error: ${err.message}`
       );
     }
   }, [id, sessionData]);
@@ -223,7 +223,7 @@ export default function Session() {
         screenStreamRef.current = stream;
         setScreenSharing(true);
         stream.getVideoTracks()[0].onended = () => { screenStreamRef.current = null; setScreenSharing(false); };
-      } catch {}
+      } catch { }
     }
   };
 
@@ -236,11 +236,11 @@ export default function Session() {
     streamRef.current?.getTracks().forEach(t => t.stop());
     micStreamRef.current?.getTracks().forEach(t => t.stop());
     screenStreamRef.current?.getTracks().forEach(t => t.stop());
-    try { await api.post(`/sessions/${id}/end`); } catch {}
+    try { await api.post(`/sessions/${id}/end`); } catch { }
     navigate(`/session/${id}/report`);
   };
 
-  const fmt = (s) => `${Math.floor(s/60).toString().padStart(2,"0")}:${(s%60).toString().padStart(2,"0")}`;
+  const fmt = (s) => `${Math.floor(s / 60).toString().padStart(2, "0")}:${(s % 60).toString().padStart(2, "0")}`;
 
   const scoreValues = Object.values(scores).filter(s => s !== null && s !== undefined);
   const avgScore = scoreValues.length
@@ -389,7 +389,9 @@ export default function Session() {
                       style={{ background: "#161B22", border: "1px solid #21262D" }}>
                       <div className="w-1.5 h-1.5 rounded-full" style={{ background: dotColor }} />
                       <span className="text-sm text-white flex-1">{student.name}</span>
-                      <span className="text-xs font-mono font-medium" style={{ color: dotColor }}>{scoreText}</span>
+                      <span className="text-xs font-mono font-medium" style={{ color: dotColor }}>
+                        {!hasScore ? "Waiting…" : `${Math.round(s)}/100`}
+                      </span>
                     </div>
                   );
                 })}
