@@ -13,6 +13,7 @@ const stripeRoutes = require("./routes/stripe");
 const { startWeeklyCron } = require("./services/cron");
 
 const app = express();
+app.set("trust proxy", 1);
 const PORT = process.env.PORT || 4000;
 
 app.get("/health", (_req, res) => {
