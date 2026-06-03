@@ -104,6 +104,9 @@ export default function Session() {
           const next = { ...prev };
           data.scores.forEach(({ studentIndex, score }) => {
             if (score !== null && score !== undefined) {
+              // Don't overwrite tutor's own camera score (index 0)
+              // unless poll is more recent
+              if (studentIndex === 0 && prev[0] !== undefined) return;
               next[studentIndex] = score;
             }
           });
@@ -386,9 +389,16 @@ export default function Session() {
       </div>
 
       {camError && (
-        <div className="px-4 py-2 text-xs border-b font-mono"
+        <div className="px-4 py-2 text-xs border-b font-mono flex items-center justify-between"
           style={{ background: "rgba(255,184,0,0.1)", borderColor: "rgba(255,184,0,0.3)", color: "#FFB800" }}>
-          ⚠ {camError}
+          <span>⚠ {camError}</span>
+          <button
+            onClick={() => { setCamError(null); startCapture(); }}
+            className="ml-4 px-3 py-1 rounded text-xs"
+            style={{ background: "rgba(255,184,0,0.2)", border: "1px solid rgba(255,184,0,0.4)" }}
+          >
+            Retry camera
+          </button>
         </div>
       )}
 
