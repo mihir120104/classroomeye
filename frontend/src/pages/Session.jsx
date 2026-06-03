@@ -91,36 +91,37 @@ export default function Session() {
     return () => clearInterval(elapsedTimer.current);
   }, []);
 
+  // Poll backend every 4s for ALL students' latest scores
   useEffect(() => {
     if (!sessionData || sessionData.status === "completed") return;
 
     const pollScores = async () => {
       try {
-        const { data } = await api.get(`/sessions/${id}`);
-        const session = data.session;
-        if (!session?.students) return;
+        const { data } = await api.get(`/sessions/${id}/scores`);
+        if (!data.scores) return;
 
         setScores(prev => {
           const next = { ...prev };
-          session.students.forEach((student, idx) => {
-            const timeline = student.engagementTimeline;
-            if (timeline && timeline.length > 0) {
-              const latest = timeline[timeline.length - 1];
-              if (latest.score !== undefined && latest.score !== null) {
-                next[idx] = latest.score;
-              }
+          data.scores.forEach(({ studentIndex, score }) => {
+            if (score !== null && score !== undefined) {
+              next[studentIndex] = score;
             }
           });
           return next;
         });
+
+        // If session ended externally, redirect to report
+        if (data.status === "completed") {
+          navigate(`/session/${id}/report`);
+        }
       } catch (e) {
         // Silent fail
       }
     };
 
-    const pollInterval = setInterval(pollScores, 5000);
-    pollScores(); // run immediately on mount
-
+    // Poll immediately then every 4 seconds
+    pollScores();
+    const pollInterval = setInterval(pollScores, 4000);
     return () => clearInterval(pollInterval);
   }, [sessionData, id]);
 

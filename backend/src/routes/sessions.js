@@ -238,4 +238,41 @@ router.get("/:id/status", async (req, res) => {
   }
 });
 
+// GET /api/sessions/:id/scores — lightweight, returns only latest score per student
+// Used by tutor dashboard to poll all students' current scores
+router.get("/:id/scores", requireAuth, async (req, res) => {
+  try {
+    const session = await Session.findOne(
+      { _id: req.params.id, tutorId: req.user._id },
+      {
+        status: 1,
+        "students.name": 1,
+        "students.averageScore": 1,
+        // Get only last 3 timeline entries per student (enough for latest score)
+        "students.engagementTimeline": { $slice: -3 },
+        "students.attentionDrops": 1,
+      }
+    ).lean();
+
+    if (!session) return res.status(404).json({ error: "Session not found" });
+
+    const scores = session.students.map((student, idx) => {
+      const timeline = student.engagementTimeline || [];
+      const latest = timeline.length > 0 ? timeline[timeline.length - 1] : null;
+      return {
+        studentIndex: idx,
+        name: student.name,
+        score: latest?.score ?? null,
+        isPresent: latest?.isPresent ?? false,
+        timestamp: latest?.timestamp ?? null,
+        attentionDrops: student.attentionDrops?.length || 0,
+      };
+    });
+
+    res.json({ scores, status: session.status });
+  } catch {
+    res.status(400).json({ error: "Invalid session ID" });
+  }
+});
+
 module.exports = router;
