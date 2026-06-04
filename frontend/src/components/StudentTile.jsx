@@ -10,54 +10,60 @@ const RING_COLOR = (score) =>
 
 const getLabel = (score, isPresent) => {
   if (score === null) return "waiting";
-  if (!isPresent)     return "not in frame";
-  if (score >= 70)    return "focused";
-  if (score >= 40)    return "looking away";
+  if (!isPresent) return "not in frame";
+  if (score >= 70) return "focused";
+  if (score >= 40) return "looking away";
   return "distracted";
 };
 
 const getReason = (score, isPresent) => {
   if (score === null || score >= 70) return null;
-  if (!isPresent)  return "Student not visible in camera";
+  if (!isPresent) return "Student not visible in camera";
   if (score >= 40) return "Head turned away from screen";
   return "Not looking at screen";
 };
 
-export default function StudentTile({ student, score, isPresent, videoRef }) {
+export default function StudentTile({ student, score, isPresent, videoRef, snapshotSrc }) {
   const circumference = 2 * Math.PI * 40;
   const offset = score !== null
     ? circumference - (score / 100) * circumference
     : circumference;
   const colors = SCORE_COLOR(score);
-  const label  = getLabel(score, isPresent);
+  const label = getLabel(score, isPresent);
   const reason = getReason(score, isPresent);
-
-  // Flash red border when critically distracted
   const isCritical = score !== null && score < 40 && isPresent;
 
   return (
     <div
       className="relative bg-[#161B22] rounded-xl overflow-hidden transition-all duration-300"
       style={{
-        border: isCritical
-          ? "1px solid rgba(255,69,69,0.6)"
-          : "1px solid #21262D",
-        boxShadow: isCritical
-          ? "0 0 12px rgba(255,69,69,0.2)"
-          : "none",
+        border: isCritical ? "1px solid rgba(255,69,69,0.6)" : "1px solid #21262D",
+        boxShadow: isCritical ? "0 0 12px rgba(255,69,69,0.2)" : "none",
       }}
     >
-      {/* Video feed */}
-      <div className="relative aspect-video bg-[#0D1117] flex items-center justify-center">
-        {videoRef ? (
+      <div className="relative aspect-video bg-[#0D1117] flex items-center justify-center overflow-hidden">
+
+        {/* Tutor's own camera feed */}
+        {videoRef && (
           <video
             ref={videoRef}
-            autoPlay
-            muted
-            playsInline
+            autoPlay muted playsInline
             className="w-full h-full object-cover"
           />
-        ) : (
+        )}
+
+        {/* Student snapshot — shows last captured frame */}
+        {!videoRef && snapshotSrc && (
+          <img
+            src={snapshotSrc}
+            alt={student?.name}
+            className="w-full h-full object-cover"
+            style={{ filter: "brightness(0.95)" }}
+          />
+        )}
+
+        {/* No feed placeholder */}
+        {!videoRef && !snapshotSrc && (
           <div className="flex flex-col items-center gap-2 text-gray-700">
             <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
@@ -67,13 +73,21 @@ export default function StudentTile({ student, score, isPresent, videoRef }) {
           </div>
         )}
 
-        {/* Presence dot */}
-        <div
-          className="absolute top-2 left-2 w-2 h-2 rounded-full"
-          style={{ background: isPresent ? "#00FF87" : "#FF4545" }}
-        />
+        {/* Snapshot indicator */}
+        {!videoRef && snapshotSrc && (
+          <div className="absolute top-2 left-2 flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono"
+            style={{ background: "rgba(13,17,23,0.8)", color: "#6B7280" }}>
+            📷 snapshot
+          </div>
+        )}
 
-        {/* Critical alert flash */}
+        {/* Presence dot */}
+        {!snapshotSrc && (
+          <div className="absolute top-2 left-2 w-2 h-2 rounded-full"
+            style={{ background: isPresent ? "#00FF87" : "#FF4545" }} />
+        )}
+
+        {/* Critical alert */}
         {isCritical && (
           <div className="absolute top-2 right-10 flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono"
             style={{ background: "rgba(255,69,69,0.2)", color: "#FF4545", border: "1px solid rgba(255,69,69,0.4)" }}>
@@ -85,18 +99,13 @@ export default function StudentTile({ student, score, isPresent, videoRef }) {
         <div className="absolute bottom-2 right-2">
           <svg width="44" height="44" viewBox="0 0 100 100" className="-rotate-90">
             <circle cx="50" cy="50" r="40" fill="none" stroke="#21262D" strokeWidth="8" />
-            <circle
-              cx="50" cy="50" r="40" fill="none"
-              stroke={RING_COLOR(score)}
-              strokeWidth="8"
-              strokeLinecap="round"
-              strokeDasharray={circumference}
-              strokeDashoffset={offset}
-              style={{ transition: "stroke-dashoffset 0.6s ease" }}
-            />
+            <circle cx="50" cy="50" r="40" fill="none"
+              stroke={RING_COLOR(score)} strokeWidth="8" strokeLinecap="round"
+              strokeDasharray={circumference} strokeDashoffset={offset}
+              style={{ transition: "stroke-dashoffset 0.6s ease" }} />
           </svg>
           <span className="absolute inset-0 flex items-center justify-center font-mono text-[10px] font-medium text-white">
-            {score !== null ? score : "—"}
+            {score !== null ? Math.round(score) : "—"}
           </span>
         </div>
       </div>
@@ -107,19 +116,13 @@ export default function StudentTile({ student, score, isPresent, videoRef }) {
           <span className="text-sm text-gray-300 truncate max-w-[120px]">
             {student?.name || "Student"}
           </span>
-          <span
-            className="text-[10px] font-mono px-2 py-0.5 rounded-md border"
-            style={{ color: colors.text, background: colors.bg, borderColor: colors.border }}
-          >
+          <span className="text-[10px] font-mono px-2 py-0.5 rounded-md border"
+            style={{ color: colors.text, background: colors.bg, borderColor: colors.border }}>
             {label}
           </span>
         </div>
-
-        {/* Reason text — only shows when score is low */}
         {reason && (
-          <p className="text-[10px] text-gray-600 mt-1 font-mono truncate">
-            {reason}
-          </p>
+          <p className="text-[10px] text-gray-600 mt-1 font-mono truncate">{reason}</p>
         )}
       </div>
     </div>

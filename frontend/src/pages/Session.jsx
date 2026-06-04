@@ -43,6 +43,7 @@ export default function Session() {
   const [showLinks, setShowLinks] = useState(true);
   const [micOn, setMicOn] = useState(false);
   const [screenSharing, setScreenSharing] = useState(false);
+  const [snapshots, setSnapshots] = useState({});
 
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -125,6 +126,27 @@ export default function Session() {
     poll();
     pollTimer.current = setInterval(poll, 4000);
     return () => clearInterval(pollTimer.current);
+  }, [id]);
+
+  // Poll snapshots every 5s — shows student camera frames on tutor dashboard
+  useEffect(() => {
+    if (!id) return;
+
+    const pollSnapshots = async () => {
+      try {
+        const { data } = await api.get(`/sessions/${id}/snapshots`);
+        if (!data.snapshots) return;
+        const newSnapshots = {};
+        data.snapshots.forEach(({ studentIndex, frame }) => {
+          if (frame) newSnapshots[studentIndex] = frame;
+        });
+        setSnapshots(newSnapshots);
+      } catch (e) { }
+    };
+
+    pollSnapshots();
+    const t = setInterval(pollSnapshots, 5000);
+    return () => clearInterval(t);
   }, [id]);
 
   // Camera start
@@ -408,6 +430,7 @@ export default function Session() {
               student={student}
               score={scores[idx] !== undefined ? Math.round(scores[idx]) : null}
               isPresent={scores[idx] !== undefined && scores[idx] > 0}
+              snapshotSrc={idx !== 0 ? snapshots[idx] : null} 
               videoRef={idx === 0 ? (el) => {
                 videoRef.current = el;
                 if (el && streamRef.current) el.srcObject = streamRef.current;

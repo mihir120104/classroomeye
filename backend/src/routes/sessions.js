@@ -5,7 +5,7 @@ const User = require("../models/User");
 const { requireAuth, requireCredits } = require("../middleware/auth");
 const { generateClassSummary } = require("../services/llm");
 const logger = require("../utils/logger");
-
+const snapshotCache = new Map();
 const router = express.Router();
 const AI_URL = () => process.env.AI_SERVICE_URL || "http://localhost:8000";
 
@@ -21,6 +21,15 @@ router.post("/start", requireAuth, requireCredits, async (req, res) => {
   } catch (err) {
     logger.error("Failed to start session:", err);
     res.status(500).json({ error: "Could not start session" });
+  }
+});
+
+// Cache latest frame per student for tutor snapshot view
+frames.forEach((f) => {
+  if (f.frame) {
+    snapshotCache.set(`${req.params.id}:${f.studentIndex}`, f.frame);
+    // Auto-clean after 30 seconds
+    setTimeout(() => snapshotCache.delete(`${req.params.id}:${f.studentIndex}`), 30000);
   }
 });
 
@@ -282,6 +291,34 @@ router.get("/:id/scores", requireAuth, async (req, res) => {
     });
 
     res.json({ scores, status: session.status });
+  } catch {
+    res.status(400).json({ error: "Invalid session ID" });
+  }
+});
+
+// GET /api/sessions/:id/snapshots — returns latest frame per student
+// Used by tutor dashboard to show student camera snapshots
+router.get("/:id/snapshots", requireAuth, async (req, res) => {
+  try {
+    const session = await Session.findOne(
+      { _id: req.params.id, tutorId: req.user._id },
+      { "students.name": 1, studentCount: 1 }
+    ).lean();
+
+    if (!session) return res.status(404).json({ error: "Session not found" });
+
+    const snapshots = session.students.map((student, idx) => {
+      const frame = snapshotCache.get(`${req.params.id}:${idx}`);
+      return {
+        studentIndex: idx,
+        name: student.name,
+        hasSnapshot: !!frame,
+        // Only send frame if it exists — prefix with data URI
+        frame: frame ? `data:image/jpeg;base64,${frame}` : null,
+      };
+    });
+
+    res.json({ snapshots });
   } catch {
     res.status(400).json({ error: "Invalid session ID" });
   }
