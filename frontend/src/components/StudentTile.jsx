@@ -1,3 +1,5 @@
+import { useEffect, useRef } from "react";
+
 const SCORE_COLOR = (score) => {
   if (score === null) return { text: "#6B7280", bg: "rgba(107,114,128,0.1)", border: "rgba(107,114,128,0.3)" };
   if (score >= 70) return { text: "#00FF87", bg: "rgba(0,255,135,0.1)", border: "rgba(0,255,135,0.3)" };
@@ -23,7 +25,8 @@ const getReason = (score, isPresent) => {
   return "Not looking at screen";
 };
 
-export default function StudentTile({ student, score, isPresent, videoRef, snapshotSrc }) {
+export default function StudentTile({ student, score, isPresent, videoRef, snapshotSrc, remoteStream }) {
+  const remoteVideoRef = useRef(null);
   const circumference = 2 * Math.PI * 40;
   const offset = score !== null
     ? circumference - (score / 100) * circumference
@@ -33,6 +36,11 @@ export default function StudentTile({ student, score, isPresent, videoRef, snaps
   const reason = getReason(score, isPresent);
   const isCritical = score !== null && score < 40 && isPresent;
 
+  useEffect(() => {
+    if (remoteVideoRef.current && remoteStream) {
+      remoteVideoRef.current.srcObject = remoteStream;
+    }
+  }, [remoteStream]);
   return (
     <div
       className="relative bg-[#161B22] rounded-xl overflow-hidden transition-all duration-300"
@@ -52,8 +60,18 @@ export default function StudentTile({ student, score, isPresent, videoRef, snaps
           />
         )}
 
-        {/* Student snapshot — shows last captured frame */}
-        {!videoRef && snapshotSrc && (
+        {/* Remote student live stream */}
+        {!videoRef && remoteStream && (
+          <video
+            ref={remoteVideoRef}
+            autoPlay
+            playsInline
+            className="w-full h-full object-cover"
+          />
+        )}
+
+        {/* Snapshot fallback when no live stream */}
+        {!videoRef && !remoteStream && snapshotSrc && (
           <img
             src={snapshotSrc}
             alt={student?.name}
@@ -62,22 +80,14 @@ export default function StudentTile({ student, score, isPresent, videoRef, snaps
           />
         )}
 
-        {/* No feed placeholder */}
-        {!videoRef && !snapshotSrc && (
+        {/* No feed */}
+        {!videoRef && !remoteStream && !snapshotSrc && (
           <div className="flex flex-col items-center gap-2 text-gray-700">
             <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
                 d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0" />
             </svg>
             <span className="text-xs font-mono">No feed</span>
-          </div>
-        )}
-
-        {/* Snapshot indicator */}
-        {!videoRef && snapshotSrc && (
-          <div className="absolute top-2 left-2 flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono"
-            style={{ background: "rgba(13,17,23,0.8)", color: "#6B7280" }}>
-            📷 snapshot
           </div>
         )}
 

@@ -1,15 +1,15 @@
 import { useEffect, useRef, useState, useCallback, memo } from "react";
 import { useParams } from "react-router-dom";
 import { publicApi } from "../api/client";
-
+import { useStudentStream } from "../hooks/useWebRTC_stream";
 // ── Isolated form component — prevents cursor jumping ─────────────────────────
 // memo() stops re-renders from parent state changes
 const JoinForm = memo(({ sessionId, onJoined }) => {
-  const [name, setName]     = useState(() => localStorage.getItem("ce_join_name") || "");
-  const [email, setEmail]   = useState(() => localStorage.getItem("ce_join_email") || "");
-  const [error, setError]   = useState("");
+  const [name, setName] = useState(() => localStorage.getItem("ce_join_name") || "");
+  const [email, setEmail] = useState(() => localStorage.getItem("ce_join_email") || "");
+  const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const nameRef  = useRef(null);
+  const nameRef = useRef(null);
   const emailRef = useRef(null);
 
   const handleSubmit = async (e) => {
@@ -104,135 +104,135 @@ const JoinForm = memo(({ sessionId, onJoined }) => {
 
 // ── Active camera view ─────────────────────────────────────────────────────────
 function ActiveView({ sessionId, studentIndex, myName }) {
-  const [score, setScore]         = useState(null);
+  const [score, setScore] = useState(null);
   const [camStatus, setCamStatus] = useState("requesting");
-  const [needsTap, setNeedsTap]   = useState(false);
-  const [errorMsg, setErrorMsg]   = useState("");
+  const [needsTap, setNeedsTap] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
 
-  const videoRef   = useRef(null);
-  const canvasRef  = useRef(null);
-  const streamRef  = useRef(null);
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const streamRef = useRef(null);
   const captureRef = useRef(null);
-  const sendRef    = useRef(null);
+  const sendRef = useRef(null);
   const mountedRef = useRef(true);
 
   useEffect(() => {
-  mountedRef.current = true;
-  const frames = [];
+    mountedRef.current = true;
+    const frames = [];
 
-  const startCamera = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
-        audio: false,
-      });
+    const startCamera = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
+          audio: true,
+        });
 
-      if (!mountedRef.current) { stream.getTracks().forEach(t => t.stop()); return; }
+        if (!mountedRef.current) { stream.getTracks().forEach(t => t.stop()); return; }
 
-      streamRef.current = stream;
+        streamRef.current = stream;
 
-      // Try attaching immediately
-      const tryAttach = () => {
-        const video = videoRef.current;
-        if (video) {
-          video.srcObject = stream;
-          video.muted = true;
-          // Force play — don't wait for any events
-          const playPromise = video.play();
-          if (playPromise) {
-            playPromise.catch(() => {
-              if (mountedRef.current) setNeedsTap(true);
+        // Try attaching immediately
+        const tryAttach = () => {
+          const video = videoRef.current;
+          if (video) {
+            video.srcObject = stream;
+            video.muted = true;
+            // Force play — don't wait for any events
+            const playPromise = video.play();
+            if (playPromise) {
+              playPromise.catch(() => {
+                if (mountedRef.current) setNeedsTap(true);
+              });
+            }
+          }
+        };
+
+        // Try now, and again after 200ms, 500ms, 1000ms as fallbacks
+        tryAttach();
+        setTimeout(tryAttach, 200);
+        setTimeout(tryAttach, 500);
+        setTimeout(tryAttach, 1000);
+
+        // Move to active state immediately — don't wait for video to play
+        if (mountedRef.current) setCamStatus("active");
+
+        // Start capturing frames
+        captureRef.current = setInterval(() => {
+          const video = videoRef.current;
+          if (!video || !streamRef.current) return;
+          // Accept any readyState >= 1 on mobile (HAVE_METADATA is enough)
+          if (video.readyState < 1) return;
+          if (!canvasRef.current) canvasRef.current = document.createElement("canvas");
+          const canvas = canvasRef.current;
+          canvas.width = 320;
+          canvas.height = 240;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) return;
+          try {
+            ctx.drawImage(video, 0, 0, 320, 240);
+            const frame = canvas.toDataURL("image/jpeg", 0.65).split(",")[1];
+            if (frame && frame.length > 100) frames.push(frame);
+          } catch (e) {
+            // drawImage fails if video not ready — skip silently
+          }
+        }, 1000);
+
+        sendRef.current = setInterval(async () => {
+          if (!frames.length) return;
+          const frame = frames[frames.length - 1];
+          frames.length = 0;
+          try {
+            const { data } = await publicApi.post(`/sessions/${sessionId}/frames`, {
+              frames: [{ studentIndex, frame }],
             });
+            if (mountedRef.current) {
+              setScore(data.scores?.[0]?.engagementScore ?? null);
+            }
+          } catch (err) {
+            if (err.response?.status === 404 && mountedRef.current) {
+              setCamStatus("ended");
+              stream.getTracks().forEach(t => t.stop());
+              clearInterval(captureRef.current);
+              clearInterval(sendRef.current);
+            }
           }
+        }, 5000);
+
+      } catch (err) {
+        if (!mountedRef.current) return;
+        if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+          setCamStatus("denied");
+        } else {
+          setCamStatus("error");
+          setErrorMsg(err.message);
         }
-      };
-
-      // Try now, and again after 200ms, 500ms, 1000ms as fallbacks
-      tryAttach();
-      setTimeout(tryAttach, 200);
-      setTimeout(tryAttach, 500);
-      setTimeout(tryAttach, 1000);
-
-      // Move to active state immediately — don't wait for video to play
-      if (mountedRef.current) setCamStatus("active");
-
-      // Start capturing frames
-      captureRef.current = setInterval(() => {
-        const video = videoRef.current;
-        if (!video || !streamRef.current) return;
-        // Accept any readyState >= 1 on mobile (HAVE_METADATA is enough)
-        if (video.readyState < 1) return;
-        if (!canvasRef.current) canvasRef.current = document.createElement("canvas");
-        const canvas = canvasRef.current;
-        canvas.width = 320;
-        canvas.height = 240;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) return;
-        try {
-          ctx.drawImage(video, 0, 0, 320, 240);
-          const frame = canvas.toDataURL("image/jpeg", 0.65).split(",")[1];
-          if (frame && frame.length > 100) frames.push(frame);
-        } catch (e) {
-          // drawImage fails if video not ready — skip silently
-        }
-      }, 1000);
-
-      sendRef.current = setInterval(async () => {
-        if (!frames.length) return;
-        const frame = frames[frames.length - 1];
-        frames.length = 0;
-        try {
-          const { data } = await publicApi.post(`/sessions/${sessionId}/frames`, {
-            frames: [{ studentIndex, frame }],
-          });
-          if (mountedRef.current) {
-            setScore(data.scores?.[0]?.engagementScore ?? null);
-          }
-        } catch (err) {
-          if (err.response?.status === 404 && mountedRef.current) {
-            setCamStatus("ended");
-            stream.getTracks().forEach(t => t.stop());
-            clearInterval(captureRef.current);
-            clearInterval(sendRef.current);
-          }
-        }
-      }, 5000);
-
-    } catch (err) {
-      if (!mountedRef.current) return;
-      if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
-        setCamStatus("denied");
-      } else {
-        setCamStatus("error");
-        setErrorMsg(err.message);
       }
-    }
-  };
+    };
 
-  startCamera();
+    startCamera();
 
-  return () => {
-    mountedRef.current = false;
-    clearInterval(captureRef.current);
-    clearInterval(sendRef.current);
-    streamRef.current?.getTracks().forEach(t => t.stop());
-  };
-}, []);
+    return () => {
+      mountedRef.current = false;
+      clearInterval(captureRef.current);
+      clearInterval(sendRef.current);
+      streamRef.current?.getTracks().forEach(t => t.stop());
+    };
+  }, []);
 
   const handleTapToPlay = () => {
-    videoRef.current?.play().catch(() => {});
+    videoRef.current?.play().catch(() => { });
     setNeedsTap(false);
   };
 
   const scoreColor = score === null ? "#6B7280"
     : score >= 70 ? "#00FF87"
-    : score >= 40 ? "#FFB800"
-    : "#FF4545";
+      : score >= 40 ? "#FFB800"
+        : "#FF4545";
 
   const scoreLabel = score === null ? "Connecting..."
     : score >= 70 ? "Great focus! 👍"
-    : score >= 40 ? "Try to stay focused"
-    : "Your tutor has been notified ⚠";
+      : score >= 40 ? "Try to stay focused"
+        : "Your tutor has been notified ⚠";
 
   if (camStatus === "ended") return (
     <div className="card max-w-sm w-full text-center">
@@ -278,84 +278,84 @@ function ActiveView({ sessionId, studentIndex, myName }) {
     </div>
   );
 
-  if (camStatus === "requesting" || camStatus === "active") 
-   return (
-  <div className="w-full max-w-sm space-y-4">
-    <div className="flex items-center justify-between px-1">
-      <p className="font-medium text-white">{myName}</p>
-      <div className="flex items-center gap-1.5 text-xs font-mono" style={{ color: "#00FF87" }}>
-        <span className="w-1.5 h-1.5 bg-[#00FF87] rounded-full animate-pulse" />
-        {camStatus === "requesting" ? "Starting…" : "Live"}
-      </div>
-    </div>
-
-    <div className="relative rounded-xl overflow-hidden"
-      style={{
-        border: score !== null && score < 40 ? "1px solid rgba(255,69,69,0.6)" : "1px solid #21262D",
-        background: "#0D1117",
-        minHeight: "260px",
-      }}>
-
-      {/* Video always in DOM */}
-      <video
-        ref={videoRef}
-        autoPlay
-        playsInline
-        muted
-        style={{ width: "100%", display: "block", minHeight: "260px", objectFit: "cover" }}
-      />
-
-      {/* Loading overlay — disappears once video plays */}
-      {camStatus === "requesting" && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center"
-          style={{ background: "rgba(13,17,23,0.9)" }}>
-          <span className="animate-spin w-8 h-8 border-2 border-[#00FF87] border-t-transparent rounded-full mb-3" />
-          <p className="text-gray-300 text-sm">Camera starting…</p>
-          <p className="text-gray-600 text-xs mt-1 font-mono">Tap Allow when browser asks</p>
+  if (camStatus === "requesting" || camStatus === "active")
+    return (
+      <div className="w-full max-w-sm space-y-4">
+        <div className="flex items-center justify-between px-1">
+          <p className="font-medium text-white">{myName}</p>
+          <div className="flex items-center gap-1.5 text-xs font-mono" style={{ color: "#00FF87" }}>
+            <span className="w-1.5 h-1.5 bg-[#00FF87] rounded-full animate-pulse" />
+            {camStatus === "requesting" ? "Starting…" : "Live"}
+          </div>
         </div>
-      )}
 
-      {/* iOS tap-to-play */}
-      {needsTap && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center cursor-pointer"
-          style={{ background: "rgba(13,17,23,0.85)" }}
-          onClick={handleTapToPlay}>
-          <div className="text-6xl mb-3">▶️</div>
-          <p className="text-white text-sm font-medium">Tap to start camera</p>
+        <div className="relative rounded-xl overflow-hidden"
+          style={{
+            border: score !== null && score < 40 ? "1px solid rgba(255,69,69,0.6)" : "1px solid #21262D",
+            background: "#0D1117",
+            minHeight: "260px",
+          }}>
+
+          {/* Video always in DOM */}
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            style={{ width: "100%", display: "block", minHeight: "260px", objectFit: "cover" }}
+          />
+
+          {/* Loading overlay — disappears once video plays */}
+          {camStatus === "requesting" && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center"
+              style={{ background: "rgba(13,17,23,0.9)" }}>
+              <span className="animate-spin w-8 h-8 border-2 border-[#00FF87] border-t-transparent rounded-full mb-3" />
+              <p className="text-gray-300 text-sm">Camera starting…</p>
+              <p className="text-gray-600 text-xs mt-1 font-mono">Tap Allow when browser asks</p>
+            </div>
+          )}
+
+          {/* iOS tap-to-play */}
+          {needsTap && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center cursor-pointer"
+              style={{ background: "rgba(13,17,23,0.85)" }}
+              onClick={handleTapToPlay}>
+              <div className="text-6xl mb-3">▶️</div>
+              <p className="text-white text-sm font-medium">Tap to start camera</p>
+            </div>
+          )}
+
+          {/* Score badge */}
+          <div className="absolute bottom-3 right-3 px-3 py-2 rounded-xl text-center"
+            style={{ background: "rgba(13,17,23,0.92)", border: "1px solid #21262D" }}>
+            <p className="font-mono font-bold text-3xl leading-none" style={{ color: scoreColor }}>
+              {score ?? "—"}
+            </p>
+            <p className="text-[10px] text-gray-500 mt-0.5">
+              {score === null ? "waiting…" : "/100"}
+            </p>
+          </div>
         </div>
-      )}
 
-      {/* Score badge */}
-      <div className="absolute bottom-3 right-3 px-3 py-2 rounded-xl text-center"
-        style={{ background: "rgba(13,17,23,0.92)", border: "1px solid #21262D" }}>
-        <p className="font-mono font-bold text-3xl leading-none" style={{ color: scoreColor }}>
-          {score ?? "—"}
+        {score !== null && (
+          <div className="rounded-xl p-4" style={{ background: "#161B22", border: "1px solid #21262D" }}>
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-xs font-mono text-gray-500">Your engagement</span>
+              <span className="font-mono font-bold text-sm" style={{ color: scoreColor }}>{score}/100</span>
+            </div>
+            <div className="bg-[#21262D] rounded-full h-2 overflow-hidden">
+              <div className="h-full rounded-full transition-all duration-700"
+                style={{ width: `${score}%`, background: scoreColor }} />
+            </div>
+            <p className="text-[10px] text-gray-600 mt-2 text-center font-mono">{scoreLabel}</p>
+          </div>
+        )}
+
+        <p className="text-center text-xs text-gray-700 font-mono">
+          Keep this tab open for the entire session
         </p>
-        <p className="text-[10px] text-gray-500 mt-0.5">
-          {score === null ? "waiting…" : "/100"}
-        </p>
       </div>
-    </div>
-
-    {score !== null && (
-      <div className="rounded-xl p-4" style={{ background: "#161B22", border: "1px solid #21262D" }}>
-        <div className="flex justify-between items-center mb-2">
-          <span className="text-xs font-mono text-gray-500">Your engagement</span>
-          <span className="font-mono font-bold text-sm" style={{ color: scoreColor }}>{score}/100</span>
-        </div>
-        <div className="bg-[#21262D] rounded-full h-2 overflow-hidden">
-          <div className="h-full rounded-full transition-all duration-700"
-            style={{ width: `${score}%`, background: scoreColor }} />
-        </div>
-        <p className="text-[10px] text-gray-600 mt-2 text-center font-mono">{scoreLabel}</p>
-      </div>
-    )}
-
-    <p className="text-center text-xs text-gray-700 font-mono">
-      Keep this tab open for the entire session
-    </p>
-  </div>
-);
+    );
 
   return (
     <div className="w-full max-w-sm space-y-4">
@@ -446,9 +446,9 @@ function ActiveView({ sessionId, studentIndex, myName }) {
 // ── Main page ──────────────────────────────────────────────────────────────────
 export default function StudentJoin() {
   const { sessionId } = useParams();
-  const [phase, setPhase]               = useState("checking");
+  const [phase, setPhase] = useState("checking");
   const [studentIndex, setStudentIndex] = useState(null);
-  const [myName, setMyName]             = useState("");
+  const [myName, setMyName] = useState("");
 
   useEffect(() => {
     publicApi.get(`/sessions/${sessionId}/status`)
@@ -523,4 +523,20 @@ export default function StudentJoin() {
       />
     </Wrap>
   );
+}
+
+function StreamSender({ sessionId, studentIndex, name, stream }) {
+  useStudentStream(sessionId, studentIndex, name, stream);
+
+  {
+    phase === "active" && streamRef.current && (
+      <StreamSender
+        sessionId={sessionId}
+        studentIndex={studentIndex}
+        name={myName}
+        stream={streamRef.current}
+      />
+    )
+  }
+  return null;
 }

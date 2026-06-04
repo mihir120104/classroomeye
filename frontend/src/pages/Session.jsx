@@ -3,7 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import StudentTile from "../components/StudentTile";
 import api from "../api/client";
-
+import { useTutorStream } from "../hooks/useWebRTC_stream";
 function CopyButton({ text }) {
   const [copied, setCopied] = useState(false);
   return (
@@ -44,6 +44,7 @@ export default function Session() {
   const [micOn, setMicOn] = useState(false);
   const [screenSharing, setScreenSharing] = useState(false);
   const [snapshots, setSnapshots] = useState({});
+  const { remoteStreams } = useTutorStream(id);
 
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -430,7 +431,8 @@ export default function Session() {
               student={student}
               score={scores[idx] !== undefined ? Math.round(scores[idx]) : null}
               isPresent={scores[idx] !== undefined && scores[idx] > 0}
-              snapshotSrc={idx !== 0 ? snapshots[idx] : null} 
+              snapshotSrc={idx !== 0 && !remoteStreams[idx] ? snapshots[idx] : null}
+              remoteStream={idx !== 0 ? remoteStreams[idx] : null}
               videoRef={idx === 0 ? (el) => {
                 videoRef.current = el;
                 if (el && streamRef.current) el.srcObject = streamRef.current;
