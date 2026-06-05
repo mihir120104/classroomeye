@@ -39,6 +39,7 @@ export default function StudentTile({ student, score, isPresent, videoRef, snaps
   useEffect(() => {
     if (remoteVideoRef.current && remoteStream) {
       remoteVideoRef.current.srcObject = remoteStream;
+      remoteVideoRef.current.play().catch(() => { });
     }
   }, [remoteStream]);
   return (
@@ -51,26 +52,18 @@ export default function StudentTile({ student, score, isPresent, videoRef, snaps
     >
       <div className="relative aspect-video bg-[#0D1117] flex items-center justify-center overflow-hidden">
 
-        {/* Tutor's own camera feed */}
-        {videoRef && (
-          <video
-            ref={videoRef}
-            autoPlay muted playsInline
-            className="w-full h-full object-cover"
-          />
-        )}
-
-        {/* Remote student live stream */}
+        {/* Live WebRTC stream from student */}
         {!videoRef && remoteStream && (
           <video
             ref={remoteVideoRef}
             autoPlay
             playsInline
             className="w-full h-full object-cover"
+            style={{ minHeight: "120px" }}
           />
         )}
 
-        {/* Snapshot fallback when no live stream */}
+        {/* Snapshot fallback — shows last captured frame */}
         {!videoRef && !remoteStream && snapshotSrc && (
           <img
             src={snapshotSrc}
@@ -80,7 +73,7 @@ export default function StudentTile({ student, score, isPresent, videoRef, snaps
           />
         )}
 
-        {/* No feed */}
+        {/* No feed placeholder */}
         {!videoRef && !remoteStream && !snapshotSrc && (
           <div className="flex flex-col items-center gap-2 text-gray-700">
             <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -91,10 +84,20 @@ export default function StudentTile({ student, score, isPresent, videoRef, snaps
           </div>
         )}
 
-        {/* Presence dot */}
-        {!snapshotSrc && (
-          <div className="absolute top-2 left-2 w-2 h-2 rounded-full"
-            style={{ background: isPresent ? "#00FF87" : "#FF4545" }} />
+        {/* Live indicator badge */}
+        {!videoRef && remoteStream && (
+          <div className="absolute top-2 left-2 flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono"
+            style={{ background: "rgba(0,255,135,0.15)", color: "#00FF87", border: "1px solid rgba(0,255,135,0.3)" }}>
+            ● live
+          </div>
+        )}
+
+        {/* Snapshot indicator */}
+        {!videoRef && !remoteStream && snapshotSrc && (
+          <div className="absolute top-2 left-2 flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono"
+            style={{ background: "rgba(13,17,23,0.8)", color: "#6B7280" }}>
+            📷 snapshot
+          </div>
         )}
 
         {/* Critical alert */}

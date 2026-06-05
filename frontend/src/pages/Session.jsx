@@ -44,7 +44,11 @@ export default function Session() {
   const [micOn, setMicOn] = useState(false);
   const [screenSharing, setScreenSharing] = useState(false);
   const [snapshots, setSnapshots] = useState({});
-  const { remoteStreams } = useTutorStream(id);
+  const { remoteStreams } = useTutorStream(
+    id,
+    micOn ? micStreamRef.current : null,
+    screenSharing ? screenStreamRef.current : null
+  );
 
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -432,7 +436,7 @@ export default function Session() {
               score={scores[idx] !== undefined ? Math.round(scores[idx]) : null}
               isPresent={scores[idx] !== undefined && scores[idx] > 0}
               snapshotSrc={idx !== 0 && !remoteStreams[idx] ? snapshots[idx] : null}
-              remoteStream={idx !== 0 ? remoteStreams[idx] : null}
+              remoteStream={idx !== 0 ? remoteStreams[idx] || null : null}
               videoRef={idx === 0 ? (el) => {
                 videoRef.current = el;
                 if (el && streamRef.current) el.srcObject = streamRef.current;
