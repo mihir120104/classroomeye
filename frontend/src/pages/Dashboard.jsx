@@ -13,22 +13,18 @@ export default function Dashboard() {
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showPaywall, setShowPaywall] = useState(false);
-  const [setupModal, setSetupModal] = useState(false);
-  const [studentNames, setStudentNames] = useState(["", "", ""]);
   const { startSession, error: sessionError } = useSession();
 
   useEffect(() => { if (searchParams.get("payment") === "success") refreshUser(); }, []);
   useEffect(() => { api.get("/sessions?limit=10").then(({ data }) => setSessions(data.sessions)).catch(() => { }).finally(() => setLoading(false)); }, []);
 
   const handleStart = async () => {
-    const names = studentNames.filter(Boolean);
-    if (!names.length) return;
     try {
-      const data = await startSession(names);
+      // Start with empty students — they join themselves via link
+      const data = await startSession([]);
       navigate(`/session/${data.sessionId}`);
     } catch (err) {
       if (err.code === "UPGRADE_REQUIRED") {
-        setSetupModal(false);
         setShowPaywall(true);
       }
     }
@@ -51,7 +47,12 @@ export default function Dashboard() {
             <h1 className="font-bold text-3xl mb-1" style={{ fontFamily: "Syne,sans-serif" }}>Hello, {user?.name || "Tutor"} 👋</h1>
             <p className="text-gray-500 text-sm">{user?.plan === "paid" ? "Pro plan · unlimited sessions" : `Free plan · ${sessionsLeft} session${sessionsLeft === 1 ? "" : "s"} remaining`}</p>
           </div>
-          <button onClick={() => setSetupModal(true)} className="btn-primary flex items-center gap-2"><span className="text-lg">+</span> New session</button>
+          <button
+            onClick={handleStart}
+            className="btn-primary flex items-center gap-2"
+          >
+            <span className="text-lg">+</span> New session
+          </button>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-10">
           {[
@@ -150,26 +151,7 @@ export default function Dashboard() {
           </div>
         )}
       </div>
-      {setupModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#080B0F]/80 backdrop-blur-sm">
-          <div className="card max-w-sm w-full mx-4">
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="font-bold text-xl" style={{ fontFamily: "Syne,sans-serif" }}>New session</h2>
-              <button onClick={() => setSetupModal(false)} className="text-gray-600 hover:text-white text-xl">×</button>
-            </div>
-            <p className="text-xs text-gray-500 font-mono uppercase tracking-widest mb-3">Student names</p>
-            <div className="space-y-2 mb-4">
-              {studentNames.map((name, i) => (
-                <input key={i} value={name} onChange={(e) => { const n = [...studentNames]; n[i] = e.target.value; setStudentNames(n); }} placeholder={`Student ${i + 1}`}
-                  className="w-full bg-[#21262D] border border-[#30363D] rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-[#00FF87] transition-colors" />
-              ))}
-            </div>
-            <button onClick={() => setStudentNames([...studentNames, ""])} className="text-xs text-gray-500 hover:text-[#00FF87] transition-colors font-mono mb-4 block">+ Add another student</button>
-            {sessionError && <p className="text-[#FF4545] text-sm mb-4">{sessionError.message}</p>}
-            <button onClick={handleStart} disabled={!studentNames.some(Boolean)} className="btn-primary w-full py-3 flex items-center justify-center gap-2">Start session →</button>
-          </div>
-        </div>
-      )}
+     
       {showPaywall && <PaywallModal onClose={() => setShowPaywall(false)} />}
     </div>
   );
