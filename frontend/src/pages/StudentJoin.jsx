@@ -3,24 +3,18 @@ import { useParams } from "react-router-dom";
 import { publicApi } from "../api/client";
 import { useStudentStream } from "../hooks/useWebRTC_stream";
 
-// ── Stream sender — connects WebRTC to tutor ──────────────────────────────────
-function StreamSender({ sessionId, studentIndex, name, stream, onTutorStream, onTutorScreen }) {
-  const { tutorStream, tutorScreenStream } = useStudentStream(
+// ── Stream sender — WebRTC connection to tutor ────────────────────────────────
+function StreamSender({ sessionId, studentIndex, name, stream, onTutorStream, onTutorScreen, onPeerStreams }) {
+  const { tutorStream, tutorScreenStream, peerStreams } = useStudentStream(
     sessionId, studentIndex, name, stream
   );
-
-  useEffect(() => {
-    if (tutorStream) onTutorStream(tutorStream);
-  }, [tutorStream]);
-
-  useEffect(() => {
-    if (tutorScreenStream) onTutorScreen(tutorScreenStream);
-  }, [tutorScreenStream]);
-
+  useEffect(() => { if (tutorStream) onTutorStream(tutorStream); }, [tutorStream]);
+  useEffect(() => { if (tutorScreenStream) onTutorScreen(tutorScreenStream); }, [tutorScreenStream]);
+  useEffect(() => { if (peerStreams) onPeerStreams(peerStreams); }, [peerStreams]);
   return null;
 }
 
-// ── Isolated form — prevents cursor jumping ───────────────────────────────────
+// ── Join form ─────────────────────────────────────────────────────────────────
 const JoinForm = memo(({ sessionId, onJoined }) => {
   const [name, setName]   = useState(() => localStorage.getItem("ce_join_name") || "");
   const [email, setEmail] = useState(() => localStorage.getItem("ce_join_email") || "");
@@ -55,35 +49,24 @@ const JoinForm = memo(({ sessionId, onJoined }) => {
       <p className="text-gray-500 text-sm mb-5">Enter your details to join.</p>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label htmlFor="join-name" className="block text-xs text-gray-500 mb-1.5 font-mono uppercase tracking-wider">
-            Your name *
-          </label>
-          <input
-            id="join-name" type="text" value={name}
-            onChange={(e) => setName(e.target.value)}
+          <label htmlFor="join-name" className="block text-xs text-gray-500 mb-1.5 font-mono uppercase tracking-wider">Your name *</label>
+          <input id="join-name" type="text" value={name} onChange={e => setName(e.target.value)}
             placeholder="Enter your full name" maxLength={50} autoComplete="name" autoFocus
             className="w-full bg-[#21262D] border rounded-lg px-4 py-3 text-white placeholder-gray-600 focus:outline-none transition-colors text-sm"
-            style={{ borderColor: error ? "#FF4545" : "#30363D" }}
-          />
+            style={{ borderColor: error ? "#FF4545" : "#30363D" }} />
           {error && <p className="text-xs mt-1 font-mono" style={{ color: "#FF4545" }}>{error}</p>}
         </div>
         <div>
           <label htmlFor="join-email" className="block text-xs text-gray-500 mb-1.5 font-mono uppercase tracking-wider">
             Email <span className="text-gray-700 normal-case">(optional)</span>
           </label>
-          <input
-            id="join-email" type="email" value={email}
-            onChange={(e) => setEmail(e.target.value)}
+          <input id="join-email" type="email" value={email} onChange={e => setEmail(e.target.value)}
             placeholder="your@email.com" autoComplete="email"
-            className="w-full bg-[#21262D] border border-[#30363D] rounded-lg px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:border-[#00FF87] transition-colors text-sm"
-          />
-          <p className="text-[10px] text-gray-600 mt-1 font-mono">Your tutor may use this to share reports.</p>
+            className="w-full bg-[#21262D] border border-[#30363D] rounded-lg px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:border-[#00FF87] transition-colors text-sm" />
         </div>
         <button type="submit" disabled={loading || !name.trim()}
           className="btn-primary w-full py-3 flex items-center justify-center gap-2">
-          {loading
-            ? <><span className="animate-spin w-4 h-4 border-2 border-[#080B0F] border-t-transparent rounded-full" />Joining…</>
-            : "Join session →"}
+          {loading ? <><span className="animate-spin w-4 h-4 border-2 border-[#080B0F] border-t-transparent rounded-full" />Joining…</> : "Join session →"}
         </button>
       </form>
       <p className="text-center text-xs text-gray-700 mt-4 font-mono">Your camera will turn on after joining</p>
@@ -91,14 +74,44 @@ const JoinForm = memo(({ sessionId, onJoined }) => {
   );
 });
 
-// ── Active camera view ─────────────────────────────────────────────────────────
+// ── Peer video tile ───────────────────────────────────────────────────────────
+function PeerTile({ stream, name, isSelf }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (ref.current && stream) {
+      ref.current.srcObject = stream;
+      ref.current.play().catch(() => {});
+    }
+  }, [stream]);
+
+  return (
+    <div className="relative rounded-xl overflow-hidden bg-[#0D1117]"
+      style={{ border: "1px solid #21262D", aspectRatio: "4/3" }}>
+      <video ref={ref} autoPlay playsInline muted={isSelf}
+        style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+      <div className="absolute bottom-2 left-2 px-2 py-0.5 rounded text-xs font-mono text-white"
+        style={{ background: "rgba(13,17,23,0.85)" }}>
+        {name}{isSelf ? " (You)" : ""}
+      </div>
+      {isSelf && (
+        <div className="absolute top-2 right-2 text-[10px] font-mono px-1.5 py-0.5 rounded"
+          style={{ background: "rgba(0,255,135,0.15)", color: "#00FF87" }}>● You</div>
+      )}
+    </div>
+  );
+}
+
+// ── Active session view ───────────────────────────────────────────────────────
 function ActiveView({ sessionId, studentIndex, myName }) {
   const [score, setScore]         = useState(null);
   const [camStatus, setCamStatus] = useState("requesting");
   const [needsTap, setNeedsTap]   = useState(false);
   const [errorMsg, setErrorMsg]   = useState("");
-  const [tutorStream, setTutorStream]           = useState(null);
+  const [micOn, setMicOn]         = useState(true);
+  const [tutorStream, setTutorStream]             = useState(null);
   const [tutorScreenStream, setTutorScreenStream] = useState(null);
+  const [peerStreams, setPeerStreams]              = useState({});
+  const [screenExpanded, setScreenExpanded]       = useState(false);
 
   const videoRef   = useRef(null);
   const canvasRef  = useRef(null);
@@ -106,6 +119,14 @@ function ActiveView({ sessionId, studentIndex, myName }) {
   const captureRef = useRef(null);
   const sendRef    = useRef(null);
   const mountedRef = useRef(true);
+
+  // Toggle mic
+  const toggleMic = useCallback(() => {
+    const stream = streamRef.current;
+    if (!stream) return;
+    stream.getAudioTracks().forEach(t => { t.enabled = !t.enabled; });
+    setMicOn(prev => !prev);
+  }, []);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -117,28 +138,23 @@ function ActiveView({ sessionId, studentIndex, myName }) {
           video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" },
           audio: true,
         });
-
         if (!mountedRef.current) { stream.getTracks().forEach(t => t.stop()); return; }
         streamRef.current = stream;
 
-        // Attach to video element — retry for Android
         const tryAttach = () => {
           const video = videoRef.current;
           if (video) {
             video.srcObject = stream;
             video.muted = true;
-            const p = video.play();
-            if (p) p.catch(() => { if (mountedRef.current) setNeedsTap(true); });
+            video.play().catch(() => { if (mountedRef.current) setNeedsTap(true); });
           }
         };
         tryAttach();
         setTimeout(tryAttach, 200);
         setTimeout(tryAttach, 500);
         setTimeout(tryAttach, 1000);
-
         if (mountedRef.current) setCamStatus("active");
 
-        // Capture frames
         captureRef.current = setInterval(() => {
           const video = videoRef.current;
           if (!video || !streamRef.current || video.readyState < 1) return;
@@ -154,7 +170,6 @@ function ActiveView({ sessionId, studentIndex, myName }) {
           } catch (e) {}
         }, 1000);
 
-        // Send frames to backend
         sendRef.current = setInterval(async () => {
           if (!frames.length) return;
           const frame = frames[frames.length - 1];
@@ -176,17 +191,12 @@ function ActiveView({ sessionId, studentIndex, myName }) {
 
       } catch (err) {
         if (!mountedRef.current) return;
-        if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
-          setCamStatus("denied");
-        } else {
-          setCamStatus("error");
-          setErrorMsg(err.message);
-        }
+        if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") setCamStatus("denied");
+        else { setCamStatus("error"); setErrorMsg(err.message); }
       }
     };
 
     startCamera();
-
     return () => {
       mountedRef.current = false;
       clearInterval(captureRef.current);
@@ -195,22 +205,15 @@ function ActiveView({ sessionId, studentIndex, myName }) {
     };
   }, []);
 
-  const handleTapToPlay = () => {
-    videoRef.current?.play().catch(() => {});
-    setNeedsTap(false);
-  };
+  // Auto-expand screen share when tutor starts sharing
+  useEffect(() => {
+    if (tutorScreenStream) setScreenExpanded(true);
+  }, [tutorScreenStream]);
 
   const scoreColor = score === null ? "#6B7280"
-    : score >= 70 ? "#00FF87"
-    : score >= 40 ? "#FFB800"
-    : "#FF4545";
-
+    : score >= 70 ? "#00FF87" : score >= 40 ? "#FFB800" : "#FF4545";
   const scoreLabel = score === null ? "Connecting..."
-    : score >= 70 ? "Great focus! 👍"
-    : score >= 40 ? "Try to stay focused"
-    : "Your tutor has been notified ⚠";
-
-  // ── Status screens ─────────────────────────────────────────────────────────
+    : score >= 70 ? "Great focus! 👍" : score >= 40 ? "Try to stay focused" : "Your tutor has been notified ⚠";
 
   if (camStatus === "ended") return (
     <div className="card max-w-sm w-full text-center">
@@ -223,12 +226,10 @@ function ActiveView({ sessionId, studentIndex, myName }) {
   if (camStatus === "denied") return (
     <div className="card max-w-sm w-full">
       <div className="text-4xl mb-4 text-center">📷</div>
-      <h2 className="font-bold text-lg mb-3 text-center" style={{ fontFamily: "Syne,sans-serif" }}>
-        Camera & Mic access needed
-      </h2>
+      <h2 className="font-bold text-lg mb-3 text-center" style={{ fontFamily: "Syne,sans-serif" }}>Camera & Mic needed</h2>
       <ol className="text-sm text-gray-400 space-y-3 mb-5">
-        <li className="flex gap-3"><span className="font-mono text-white shrink-0">1.</span>Tap the 🔒 icon in your browser address bar</li>
-        <li className="flex gap-3"><span className="font-mono text-white shrink-0">2.</span>Set <strong>Camera</strong> and <strong>Microphone</strong> to <span style={{ color: "#00FF87" }}>Allow</span></li>
+        <li className="flex gap-3"><span className="font-mono text-white shrink-0">1.</span>Tap 🔒 in address bar</li>
+        <li className="flex gap-3"><span className="font-mono text-white shrink-0">2.</span>Set Camera & Microphone → <span style={{ color: "#00FF87" }}>Allow</span></li>
         <li className="flex gap-3"><span className="font-mono text-white shrink-0">3.</span>Refresh the page</li>
       </ol>
       <button onClick={() => window.location.reload()} className="btn-primary w-full py-3">Refresh page</button>
@@ -243,82 +244,129 @@ function ActiveView({ sessionId, studentIndex, myName }) {
     </div>
   );
 
-  // ── Active / requesting screen ─────────────────────────────────────────────
-  return (
-    <div className="w-full max-w-sm space-y-4">
+  const otherPeers = Object.entries(peerStreams).filter(([idx]) => parseInt(idx) !== studentIndex);
 
-      {/* WebRTC — send student stream to tutor, receive tutor audio + screen */}
+  return (
+    <div className="w-full max-w-lg space-y-4 pb-8">
+
+      {/* WebRTC connection */}
       {camStatus === "active" && streamRef.current && studentIndex !== null && (
         <StreamSender
-          sessionId={sessionId}
-          studentIndex={studentIndex}
-          name={myName}
+          sessionId={sessionId} studentIndex={studentIndex} name={myName}
           stream={streamRef.current}
           onTutorStream={setTutorStream}
           onTutorScreen={setTutorScreenStream}
+          onPeerStreams={setPeerStreams}
         />
       )}
 
-      {/* Hidden audio element — plays tutor's voice */}
+      {/* Hidden audio — tutor's voice */}
       {tutorStream && (
-        <audio
-          autoPlay
-          ref={(el) => { if (el) el.srcObject = tutorStream; }}
-          style={{ display: "none" }}
-        />
+        <audio autoPlay ref={el => { if (el) el.srcObject = tutorStream; }} style={{ display: "none" }} />
       )}
 
+      {/* ── Top bar — name + mic button ────────────────────────────────── */}
       <div className="flex items-center justify-between px-1">
-        <p className="font-medium text-white">{myName}</p>
-        <div className="flex items-center gap-1.5 text-xs font-mono" style={{ color: "#00FF87" }}>
-          <span className="w-1.5 h-1.5 bg-[#00FF87] rounded-full animate-pulse" />
-          {camStatus === "requesting" ? "Starting…" : "Live"}
+        <div className="flex items-center gap-2">
+          <p className="font-medium text-white">{myName}</p>
+          <div className="flex items-center gap-1 text-xs font-mono" style={{ color: "#00FF87" }}>
+            <span className="w-1.5 h-1.5 bg-[#00FF87] rounded-full animate-pulse" />
+            {camStatus === "requesting" ? "Starting…" : "Live"}
+          </div>
         </div>
+
+        {/* Mic toggle */}
+        <button
+          onClick={toggleMic}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono transition-all"
+          style={{
+            background: micOn ? "rgba(0,255,135,0.1)" : "rgba(255,69,69,0.1)",
+            border: micOn ? "1px solid rgba(0,255,135,0.3)" : "1px solid rgba(255,69,69,0.3)",
+            color: micOn ? "#00FF87" : "#FF4545",
+          }}
+        >
+          {micOn ? "🎙 Mic on" : "🔇 Mic off"}
+        </button>
       </div>
 
-      {/* Student's own camera */}
-      <div className="relative rounded-xl overflow-hidden"
-        style={{
-          border: score !== null && score < 40 ? "1px solid rgba(255,69,69,0.6)" : "1px solid #21262D",
-          background: "#0D1117", minHeight: "260px",
-        }}>
-        <video
-          ref={videoRef} autoPlay playsInline muted
-          style={{ width: "100%", display: "block", minHeight: "260px", objectFit: "cover" }}
-        />
-
-        {/* Loading overlay */}
-        {camStatus === "requesting" && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center"
-            style={{ background: "rgba(13,17,23,0.9)" }}>
-            <span className="animate-spin w-8 h-8 border-2 border-[#00FF87] border-t-transparent rounded-full mb-3" />
-            <p className="text-gray-300 text-sm">Camera starting…</p>
-            <p className="text-gray-600 text-xs mt-1 font-mono">Tap Allow when browser asks</p>
+      {/* ── Tutor screen share — auto shows when tutor shares ──────────── */}
+      {tutorScreenStream && (
+        <div className="rounded-xl overflow-hidden"
+          style={{ border: "2px solid rgba(59,130,246,0.6)", background: "#000" }}>
+          <div className="flex items-center justify-between px-3 py-2 text-xs font-mono"
+            style={{ background: "rgba(59,130,246,0.15)", color: "#3B82F6" }}>
+            <span>🖥 Tutor's screen</span>
+            <button onClick={() => setScreenExpanded(v => !v)} className="text-blue-400 hover:text-white">
+              {screenExpanded ? "▼ Collapse" : "▲ Expand"}
+            </button>
           </div>
-        )}
-
-        {/* iOS tap-to-play */}
-        {needsTap && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center cursor-pointer"
-            style={{ background: "rgba(13,17,23,0.85)" }} onClick={handleTapToPlay}>
-            <div className="text-6xl mb-3">▶️</div>
-            <p className="text-white text-sm font-medium">Tap to start camera</p>
-          </div>
-        )}
-
-        {/* Score badge */}
-        <div className="absolute bottom-3 right-3 px-3 py-2 rounded-xl text-center"
-          style={{ background: "rgba(13,17,23,0.92)", border: "1px solid #21262D" }}>
-          <p className="font-mono font-bold text-3xl leading-none" style={{ color: scoreColor }}>
-            {score ?? "—"}
-          </p>
-          <p className="text-[10px] text-gray-500 mt-0.5">
-            {score === null ? "waiting…" : "/100"}
-          </p>
+          {screenExpanded && (
+            <video autoPlay playsInline
+              ref={el => { if (el) el.srcObject = tutorScreenStream; }}
+              style={{ width: "100%", maxHeight: "280px", objectFit: "contain", display: "block", background: "#000" }}
+            />
+          )}
         </div>
+      )}
+
+      {/* ── Camera grid — your camera + other students ──────────────────── */}
+      <div className={`grid gap-3 ${otherPeers.length > 0 ? "grid-cols-2" : "grid-cols-1"}`}>
+        {/* Your own camera */}
+        <div className="relative rounded-xl overflow-hidden bg-[#0D1117]"
+          style={{
+            border: score !== null && score < 40 ? "1px solid rgba(255,69,69,0.6)" : "1px solid #21262D",
+            aspectRatio: "4/3",
+          }}>
+          <video ref={videoRef} autoPlay playsInline muted
+            style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", minHeight: "160px" }} />
+
+          {camStatus === "requesting" && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center"
+              style={{ background: "rgba(13,17,23,0.9)" }}>
+              <span className="animate-spin w-6 h-6 border-2 border-[#00FF87] border-t-transparent rounded-full mb-2" />
+              <p className="text-gray-400 text-xs font-mono">Starting camera…</p>
+            </div>
+          )}
+
+          {needsTap && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center cursor-pointer"
+              style={{ background: "rgba(13,17,23,0.85)" }}
+              onClick={() => { videoRef.current?.play().catch(() => {}); setNeedsTap(false); }}>
+              <div className="text-4xl mb-2">▶️</div>
+              <p className="text-white text-xs">Tap to start</p>
+            </div>
+          )}
+
+          {/* Score badge */}
+          <div className="absolute bottom-2 right-2 px-2 py-1 rounded-lg text-center"
+            style={{ background: "rgba(13,17,23,0.92)", border: "1px solid #21262D" }}>
+            <p className="font-mono font-bold text-xl leading-none" style={{ color: scoreColor }}>{score ?? "—"}</p>
+            <p className="text-[9px] text-gray-500">{score === null ? "…" : "/100"}</p>
+          </div>
+
+          {/* Your name */}
+          <div className="absolute bottom-2 left-2 px-2 py-0.5 rounded text-xs font-mono text-white"
+            style={{ background: "rgba(13,17,23,0.85)" }}>
+            {myName} <span className="text-gray-500">(You)</span>
+          </div>
+
+          {/* Mic indicator */}
+          <div className="absolute top-2 left-2 text-[10px] px-1.5 py-0.5 rounded font-mono"
+            style={{
+              background: micOn ? "rgba(0,255,135,0.15)" : "rgba(255,69,69,0.15)",
+              color: micOn ? "#00FF87" : "#FF4545",
+            }}>
+            {micOn ? "🎙" : "🔇"}
+          </div>
+        </div>
+
+        {/* Other students via WebRTC */}
+        {otherPeers.map(([idx, stream]) => (
+          <PeerTile key={idx} stream={stream} name={`Student ${parseInt(idx) + 1}`} isSelf={false} />
+        ))}
       </div>
 
-      {/* Score bar */}
+      {/* ── Engagement bar ────────────────────────────────────────────── */}
       {score !== null && (
         <div className="rounded-xl p-4" style={{ background: "#161B22", border: "1px solid #21262D" }}>
           <div className="flex justify-between items-center mb-2">
@@ -326,46 +374,18 @@ function ActiveView({ sessionId, studentIndex, myName }) {
             <span className="font-mono font-bold text-sm" style={{ color: scoreColor }}>{score}/100</span>
           </div>
           <div className="bg-[#21262D] rounded-full h-2 overflow-hidden">
-            <div className="h-full rounded-full transition-all duration-700"
-              style={{ width: `${score}%`, background: scoreColor }} />
+            <div className="h-full rounded-full transition-all duration-700" style={{ width: `${score}%`, background: scoreColor }} />
           </div>
           <p className="text-[10px] text-gray-600 mt-2 text-center font-mono">{scoreLabel}</p>
         </div>
       )}
 
-      {/* Tutor screen share — shows when tutor shares screen */}
-      {tutorScreenStream && (
-        <div className="rounded-xl overflow-hidden"
-          style={{ border: "1px solid rgba(59,130,246,0.5)" }}>
-          <div className="flex items-center gap-2 px-3 py-1.5 text-xs font-mono"
-            style={{ background: "rgba(59,130,246,0.1)", color: "#3B82F6" }}>
-            🖥 Tutor's screen
-          </div>
-          <video
-            autoPlay playsInline
-            ref={(el) => { if (el) el.srcObject = tutorScreenStream; }}
-            className="w-full"
-            style={{ maxHeight: "200px", objectFit: "contain", background: "#000", display: "block" }}
-          />
-        </div>
-      )}
-
-      {/* Mic status indicator */}
-      {camStatus === "active" && (
-        <div className="flex items-center justify-center gap-2 text-xs font-mono text-gray-600">
-          <span>🎙</span>
-          <span>Mic active — your tutor can hear you</span>
-        </div>
-      )}
-
-      <p className="text-center text-xs text-gray-700 font-mono">
-        Keep this tab open for the entire session
-      </p>
+      <p className="text-center text-xs text-gray-700 font-mono">Keep this tab open for the entire session</p>
     </div>
   );
 }
 
-// ── Main page ──────────────────────────────────────────────────────────────────
+// ── Main page ─────────────────────────────────────────────────────────────────
 export default function StudentJoin() {
   const { sessionId } = useParams();
   const [phase, setPhase]               = useState("checking");
@@ -386,7 +406,7 @@ export default function StudentJoin() {
   }, []);
 
   const Logo = () => (
-    <div className="text-center mb-8">
+    <div className="text-center mb-6">
       <p className="font-bold text-2xl tracking-tight" style={{ fontFamily: "Syne,sans-serif" }}>
         Classroom<span style={{ color: "#00FF87" }}>Eye</span>
       </p>
@@ -394,7 +414,7 @@ export default function StudentJoin() {
   );
 
   const Wrap = ({ children }) => (
-    <div className="min-h-screen bg-[#080B0F] flex flex-col items-center justify-center px-4">
+    <div className="min-h-screen bg-[#080B0F] flex flex-col items-center justify-center px-4 py-8">
       <Logo />
       {children}
     </div>
