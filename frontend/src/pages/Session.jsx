@@ -33,6 +33,8 @@ export default function Session() {
   const { id } = useParams();
   const navigate = useNavigate();
 
+  const [micStream, setMicStream] = useState(null);
+  const [screenStream, setScreenStream] = useState(null);
   const [sessionData, setSessionData] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [ending, setEnding] = useState(false);
@@ -44,11 +46,7 @@ export default function Session() {
   const [micOn, setMicOn] = useState(false);
   const [screenSharing, setScreenSharing] = useState(false);
   const [snapshots, setSnapshots] = useState({});
-  const { remoteStreams } = useTutorStream(
-    id,
-    micOn ? micStreamRef.current : null,
-    screenSharing ? screenStreamRef.current : null
-  );
+  const { remoteStreams } = useTutorStream(id, micStream, screenStream);
 
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -229,13 +227,17 @@ export default function Session() {
     if (micOn) {
       micStreamRef.current?.getTracks().forEach(t => t.stop());
       micStreamRef.current = null;
+      setMicStream(null);
       setMicOn(false);
     } else {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
         micStreamRef.current = stream;
+        setMicStream(stream);
         setMicOn(true);
-      } catch { alert("Microphone permission denied."); }
+      } catch {
+        alert("Microphone permission denied.");
+      }
     }
   };
 
@@ -243,13 +245,22 @@ export default function Session() {
     if (screenSharing) {
       screenStreamRef.current?.getTracks().forEach(t => t.stop());
       screenStreamRef.current = null;
+      setScreenStream(null);
       setScreenSharing(false);
     } else {
       try {
-        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+        const stream = await navigator.mediaDevices.getDisplayMedia({
+          video: { cursor: "always" },
+          audio: true,
+        });
         screenStreamRef.current = stream;
+        setScreenStream(stream);
         setScreenSharing(true);
-        stream.getVideoTracks()[0].onended = () => { screenStreamRef.current = null; setScreenSharing(false); };
+        stream.getVideoTracks()[0].onended = () => {
+          screenStreamRef.current = null;
+          setScreenStream(null);
+          setScreenSharing(false);
+        };
       } catch { }
     }
   };

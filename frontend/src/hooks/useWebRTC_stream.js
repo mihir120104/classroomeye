@@ -14,7 +14,7 @@ const SOCKET_URL = import.meta.env.VITE_API_URL || "http://localhost:4000";
 // ── TUTOR HOOK — receives all student streams ─────────────────────────────────
 export function useTutorStream(sessionId, micStream, screenStream) {
   const socketRef = useRef(null);
-  const peersRef  = useRef({});
+  const peersRef = useRef({});
   const [remoteStreams, setRemoteStreams] = useState({});
 
   const addTutorTracks = (pc) => {
@@ -22,21 +22,61 @@ export function useTutorStream(sessionId, micStream, screenStream) {
     if (screenStream) screenStream.getTracks().forEach(t => pc.addTrack(t, screenStream));
   };
 
+  socket.on("webrtc-answer", async ({ answer, studentIndex, answerType }) => {
+    const peer = Object.values(peersRef.current).find(p => p.studentIndex === studentIndex);
+    if (peer?.pc) {
+      try {
+        if (peer.pc.signalingState !== "stable") {
+          await peer.pc.setRemoteDescription(new RTCSessionDescription(answer));
+        }
+      } catch (e) { }
+    }
+  });
+
   // Renegotiate when mic/screen changes
   useEffect(() => {
-    Object.values(peersRef.current).forEach(({ pc }) => {
+    const socket = socketRef.current;
+    if (!socket || !sessionId) return;
+
+    Object.entries(peersRef.current).forEach(async ([socketId, { pc, studentIndex }]) => {
       const senders = pc.getSenders();
+
+      // Update audio track
       const audioSender = senders.find(s => s.track?.kind === "audio");
       const newAudio = micStream?.getAudioTracks()[0] || null;
-      if (audioSender) audioSender.replaceTrack(newAudio).catch(() => {});
-      else if (newAudio && micStream) pc.addTrack(newAudio, micStream);
+      if (audioSender) {
+        audioSender.replaceTrack(newAudio).catch(() => { });
+      } else if (newAudio && micStream) {
+        pc.addTrack(newAudio, micStream);
+      }
 
+      // Update video/screen track
       const videoSender = senders.find(s => s.track?.kind === "video");
       const newVideo = screenStream?.getVideoTracks()[0] || null;
-      if (videoSender) videoSender.replaceTrack(newVideo).catch(() => {});
-      else if (newVideo && screenStream) screenStream.getTracks().forEach(t => pc.addTrack(t, screenStream));
+      if (videoSender) {
+        videoSender.replaceTrack(newVideo).catch(() => { });
+      } else if (newVideo && screenStream) {
+        screenStream.getTracks().forEach(t => pc.addTrack(t, screenStream));
+      }
+
+      // Renegotiate — create new offer so student receives updated tracks
+      try {
+        if (pc.signalingState === "stable") {
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          socket.emit("webrtc-offer", {
+            sessionId,
+            studentIndex,
+            offer,
+            to: socketId,
+            offerType: "renegotiate",
+          });
+        }
+      } catch (e) {
+        console.warn("Renegotiation failed:", e.message);
+      }
     });
-  }, [micStream, screenStream]);
+  }, [micStream, screenStream, sessionId]);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -78,14 +118,14 @@ export function useTutorStream(sessionId, micStream, screenStream) {
     socket.on("webrtc-answer", async ({ answer, studentIndex }) => {
       const peer = Object.values(peersRef.current).find(p => p.studentIndex === studentIndex);
       if (peer?.pc && peer.pc.signalingState !== "stable") {
-        await peer.pc.setRemoteDescription(new RTCSessionDescription(answer)).catch(() => {});
+        await peer.pc.setRemoteDescription(new RTCSessionDescription(answer)).catch(() => { });
       }
     });
 
     socket.on("ice-candidate", async ({ candidate, from }) => {
       const peer = peersRef.current[from];
       if (peer?.pc?.remoteDescription) {
-        await peer.pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
+        await peer.pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => { });
       }
     });
 
@@ -107,14 +147,14 @@ export function useTutorStream(sessionId, micStream, screenStream) {
 
 // ── STUDENT HOOK — sends stream to tutor, receives tutor + peers ──────────────
 export function useStudentStream(sessionId, studentIndex, name, stream) {
-  const socketRef    = useRef(null);
-  const tutorPcRef   = useRef(null);   // peer connection to tutor
-  const peerPcsRef   = useRef({});     // peer connections to other students
-  const socketIdRef  = useRef(null);
+  const socketRef = useRef(null);
+  const tutorPcRef = useRef(null);   // peer connection to tutor
+  const peerPcsRef = useRef({});     // peer connections to other students
+  const socketIdRef = useRef(null);
 
-  const [tutorStream, setTutorStream]             = useState(null);
+  const [tutorStream, setTutorStream] = useState(null);
   const [tutorScreenStream, setTutorScreenStream] = useState(null);
-  const [peerStreams, setPeerStreams]              = useState({}); // { studentIndex: MediaStream }
+  const [peerStreams, setPeerStreams] = useState({}); // { studentIndex: MediaStream }
 
   useEffect(() => {
     if (!sessionId || studentIndex === null || !stream) return;
@@ -129,6 +169,19 @@ export function useStudentStream(sessionId, studentIndex, name, stream) {
 
     // Tutor sends offer → student answers
     socket.on("webrtc-offer", async ({ offer, from, offerType }) => {
+      if (offerType === "renegotiate" && tutorPcRef.current) {
+        const pc = tutorPcRef.current;
+        try {
+          await pc.setRemoteDescription(new RTCSessionDescription(offer));
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          socket.emit("webrtc-answer", { to: from, answer, studentIndex, answerType: "renegotiate" });
+        } catch (e) {
+          console.warn("Renegotiation answer failed:", e.message);
+        }
+        return;
+      }
+
       if (offerType === "peer") {
         // Peer-to-peer offer from another student
         const pc = new RTCPeerConnection(STUN);
@@ -188,7 +241,7 @@ export function useStudentStream(sessionId, studentIndex, name, stream) {
     socket.on("ice-candidate", async ({ candidate, from }) => {
       const pc = tutorPcRef.current || peerPcsRef.current[from];
       if (pc?.remoteDescription) {
-        await pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
+        await pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => { });
       }
     });
 
