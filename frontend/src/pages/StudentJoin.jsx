@@ -16,7 +16,7 @@ function StreamSender({ sessionId, studentIndex, name, stream, onTutorStream, on
 
 // ── Join form ─────────────────────────────────────────────────────────────────
 const JoinForm = memo(({ sessionId, onJoined }) => {
-  const [name, setName]   = useState(() => localStorage.getItem("ce_join_name") || "");
+  const [name, setName] = useState(() => localStorage.getItem("ce_join_name") || "");
   const [email, setEmail] = useState(() => localStorage.getItem("ce_join_email") || "");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -80,7 +80,7 @@ function PeerTile({ stream, name, isSelf }) {
   useEffect(() => {
     if (ref.current && stream) {
       ref.current.srcObject = stream;
-      ref.current.play().catch(() => {});
+      ref.current.play().catch(() => { });
     }
   }, [stream]);
 
@@ -103,21 +103,21 @@ function PeerTile({ stream, name, isSelf }) {
 
 // ── Active session view ───────────────────────────────────────────────────────
 function ActiveView({ sessionId, studentIndex, myName }) {
-  const [score, setScore]         = useState(null);
+  const [score, setScore] = useState(null);
   const [camStatus, setCamStatus] = useState("requesting");
-  const [needsTap, setNeedsTap]   = useState(false);
-  const [errorMsg, setErrorMsg]   = useState("");
-  const [micOn, setMicOn]         = useState(true);
-  const [tutorStream, setTutorStream]             = useState(null);
+  const [needsTap, setNeedsTap] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
+  const [micOn, setMicOn] = useState(true);
+  const [tutorStream, setTutorStream] = useState(null);
   const [tutorScreenStream, setTutorScreenStream] = useState(null);
-  const [peerStreams, setPeerStreams]              = useState({});
-  const [screenExpanded, setScreenExpanded]       = useState(false);
+  const [peerStreams, setPeerStreams] = useState({});
+  const [screenExpanded, setScreenExpanded] = useState(false);
 
-  const videoRef   = useRef(null);
-  const canvasRef  = useRef(null);
-  const streamRef  = useRef(null);
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const streamRef = useRef(null);
   const captureRef = useRef(null);
-  const sendRef    = useRef(null);
+  const sendRef = useRef(null);
   const mountedRef = useRef(true);
 
   // Toggle mic
@@ -167,7 +167,7 @@ function ActiveView({ sessionId, studentIndex, myName }) {
             ctx.drawImage(video, 0, 0, 320, 240);
             const frame = canvas.toDataURL("image/jpeg", 0.65).split(",")[1];
             if (frame && frame.length > 100) frames.push(frame);
-          } catch (e) {}
+          } catch (e) { }
         }, 1000);
 
         sendRef.current = setInterval(async () => {
@@ -205,9 +205,15 @@ function ActiveView({ sessionId, studentIndex, myName }) {
     };
   }, []);
 
-  // Auto-expand screen share when tutor starts sharing
+  // Add this ref at the top of ActiveView component, with other refs:
+  const tutorScreenVideoRef = useRef(null);
+
+  // Add this useEffect inside ActiveView, after other useEffects:
   useEffect(() => {
-    if (tutorScreenStream) setScreenExpanded(true);
+    const el = tutorScreenVideoRef.current;
+    if (!el || !tutorScreenStream) return;
+    el.srcObject = tutorScreenStream;
+    el.play().catch(() => { });
   }, [tutorScreenStream]);
 
   const scoreColor = score === null ? "#6B7280"
@@ -301,8 +307,10 @@ function ActiveView({ sessionId, studentIndex, myName }) {
             </button>
           </div>
           {screenExpanded && (
-            <video autoPlay playsInline
-              ref={el => { if (el) el.srcObject = tutorScreenStream; }}
+            <video
+              ref={tutorScreenVideoRef}
+              autoPlay
+              playsInline
               style={{ width: "100%", maxHeight: "280px", objectFit: "contain", display: "block", background: "#000" }}
             />
           )}
@@ -331,7 +339,7 @@ function ActiveView({ sessionId, studentIndex, myName }) {
           {needsTap && (
             <div className="absolute inset-0 flex flex-col items-center justify-center cursor-pointer"
               style={{ background: "rgba(13,17,23,0.85)" }}
-              onClick={() => { videoRef.current?.play().catch(() => {}); setNeedsTap(false); }}>
+              onClick={() => { videoRef.current?.play().catch(() => { }); setNeedsTap(false); }}>
               <div className="text-4xl mb-2">▶️</div>
               <p className="text-white text-xs">Tap to start</p>
             </div>
@@ -388,9 +396,9 @@ function ActiveView({ sessionId, studentIndex, myName }) {
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function StudentJoin() {
   const { sessionId } = useParams();
-  const [phase, setPhase]               = useState("checking");
+  const [phase, setPhase] = useState("checking");
   const [studentIndex, setStudentIndex] = useState(null);
-  const [myName, setMyName]             = useState("");
+  const [myName, setMyName] = useState("");
 
   useEffect(() => {
     publicApi.get(`/sessions/${sessionId}/status`)
