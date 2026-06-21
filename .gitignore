@@ -10,3 +10,9 @@ backend/.env
 ai_service/.env
 .DS_Store
 Thumbs.db
+
+backend/.env
+backend/.env.test
+backend/.env.example
+frontend/.env
+frontend/.env.example
